@@ -58,6 +58,16 @@ python -m aiotemescal 192.168.1.15 -v
 prints every message and connection change; use it while cutting power to the
 device to see how quickly the loss and the return are detected.
 
+## Tests
+
+```
+make test                                          # unit tests, against a fake soundbar
+make test-live TEMESCAL_HOST=192.168.1.127         # read-only tests against a real device
+make test-power-cycle TEMESCAL_HOST=192.168.1.127  # asks you to unplug and replug it
+```
+
+`TEMESCAL_PORT` overrides the default port 9741.
+
 ## Device behaviour
 
 Notes gathered on an SP8YA:
