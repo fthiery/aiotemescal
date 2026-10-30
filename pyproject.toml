@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aiotemescal"
+version = "0.1.0"
+description = "Asyncio client for LG soundbars and speakers (temescal protocol)"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Florent Thiéry", email = "fthiery@gmail.com" }]
+requires-python = ">=3.12"
+dependencies = ["cryptography>=42"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: AsyncIO",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Topic :: Home Automation",
+]
+
+[project.scripts]
+aiotemescal = "aiotemescal.__main__:main"
+
+[project.urls]
+Source = "https://github.com/fthiery/aiotemescal"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
