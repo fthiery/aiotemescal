@@ -23,9 +23,7 @@ async def _refresh(client: TemescalClient) -> None:
 
 
 async def _main(args: argparse.Namespace) -> None:
-    client = TemescalClient(
-        args.host, args.port, heartbeat_interval=args.heartbeat_interval
-    )
+    client = TemescalClient(args.host, args.port)
     refreshes: set[asyncio.Task[None]] = set()
 
     def on_message(message: dict[str, Any]) -> None:
@@ -52,7 +50,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="aiotemescal", description=__doc__)
     parser.add_argument("host")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument("--heartbeat-interval", type=float, default=15.0)
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logs")
     args = parser.parse_args()
     logging.basicConfig(

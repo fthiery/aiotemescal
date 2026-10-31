@@ -23,7 +23,7 @@ class FakeSoundbar:
     def __init__(self, port: int) -> None:
         self.port = port
         self.answers: dict[str, dict[str, Any]] = {}
-        # False simulates a power cut: the connection stays open but goes silent
+        # False makes the device ignore requests while keeping the connection open
         self.responsive = True
         self.received: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._server: asyncio.Server | None = None

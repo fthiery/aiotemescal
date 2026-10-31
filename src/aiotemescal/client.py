@@ -35,6 +35,16 @@ _LOGGER = logging.getLogger(__package__)
 # Real messages are a few KiB; anything bigger means the stream is out of sync
 MAX_BODY_SIZE = 1 << 20
 
+# A device that loses power stops acknowledging, so the kernel detects it without
+# any application traffic: idle connections after 5 + 2 * 1 s of keepalive probes,
+# and connections with unacknowledged data (a command just sent) after 3 s
+_TCP_OPTIONS = (
+    ("TCP_KEEPIDLE", 5),
+    ("TCP_KEEPINTVL", 1),
+    ("TCP_KEEPCNT", 2),
+    ("TCP_USER_TIMEOUT", 3000),
+)
+
 type MessageCallback = Callable[[dict[str, Any]], None]
 type ConnectionCallback = Callable[[bool], None]
 
@@ -53,24 +63,22 @@ class TemescalClient:
         host: str,
         port: int = DEFAULT_PORT,
         *,
-        heartbeat_interval: float = 15.0,
         response_timeout: float = 5.0,
         connect_timeout: float = 5.0,
         min_backoff: float = 1.0,
-        max_backoff: float = 30.0,
+        max_backoff: float = 5.0,
     ) -> None:
         """Initialize the client; no I/O happens until start or connect."""
         self.host = host
         self.port = port
-        self._heartbeat_interval = heartbeat_interval
         self._response_timeout = response_timeout
         self._connect_timeout = connect_timeout
         self._min_backoff = min_backoff
         self._max_backoff = max_backoff
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
-        self._last_received = 0.0
         self._task: asyncio.Task[None] | None = None
+        self._wake = asyncio.Event()
         self._pending: dict[str, list[asyncio.Future[dict[str, Any]]]] = {}
         self._message_callbacks: list[MessageCallback] = []
         self._connection_callbacks: list[ConnectionCallback] = []
@@ -94,6 +102,16 @@ class TemescalClient:
             self._task = asyncio.create_task(
                 self._run(), name=f"aiotemescal {self.host}"
             )
+
+    def reconnect_now(self) -> None:
+        """Retry connecting right away, e.g. when the device announces itself."""
+        if self._writer is None:
+            self._wake.set()
+
+    def set_host(self, host: str) -> None:
+        """Change the address of the device and connect to it right away."""
+        self.host = host
+        self.reconnect_now()
 
     async def connect(self) -> None:
         """Connect once, without reconnecting if the connection is lost."""
@@ -165,25 +183,37 @@ class TemescalClient:
     async def _run(self) -> None:
         backoff = self._min_backoff
         while True:
+            self._wake.clear()
             try:
                 await self._open()
             except TemescalConnectionError as err:
                 _LOGGER.debug("%s, retrying in %.1f s", err, backoff)
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, self._max_backoff)
+                if await self._wait(backoff):
+                    backoff = self._min_backoff
+                else:
+                    backoff = min(backoff * 2, self._max_backoff)
                 continue
             backoff = self._min_backoff
             try:
-                await self._session()
+                await self._read_frames()
             except _SESSION_ERRORS as err:
                 _LOGGER.debug("%s: connection lost: %r", self.host, err)
             finally:
                 self._close()
-            await asyncio.sleep(backoff)
+            await self._wait(backoff)
+
+    async def _wait(self, delay: float) -> bool:
+        """Sleep for the delay; return whether reconnect_now() cut it short."""
+        try:
+            async with asyncio.timeout(delay):
+                await self._wake.wait()
+        except TimeoutError:
+            return False
+        return True
 
     async def _serve_once(self) -> None:
         try:
-            await self._session()
+            await self._read_frames()
         except _SESSION_ERRORS as err:
             _LOGGER.debug("%s: connection lost: %r", self.host, err)
         finally:
@@ -200,8 +230,10 @@ class TemescalClient:
             ) from err
         if (sock := writer.get_extra_info("socket")) is not None:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            for name, value in _TCP_OPTIONS:
+                if (option := getattr(socket, name, None)) is not None:
+                    sock.setsockopt(socket.IPPROTO_TCP, option, value)
         self._reader, self._writer = reader, writer
-        self._last_received = asyncio.get_running_loop().time()
         _LOGGER.debug("Connected to %s:%s", self.host, self.port)
         self._notify_connection(True)
 
@@ -220,30 +252,18 @@ class TemescalClient:
         _LOGGER.debug("Disconnected from %s", self.host)
         self._notify_connection(False)
 
-    async def _session(self) -> None:
-        heartbeat = asyncio.create_task(self._heartbeat())
-        try:
-            await self._read_frames()
-        finally:
-            heartbeat.cancel()
-
     async def _read_frames(self) -> None:
         if (reader := self._reader) is None:
             return
-        loop = asyncio.get_running_loop()
-        # The heartbeat guarantees traffic, so silence means the device is gone
-        silence_timeout = self._heartbeat_interval + self._response_timeout
         while True:
-            async with asyncio.timeout(silence_timeout):
-                marker = (await reader.readexactly(1))[0]
-                if marker != FRAME_MARKER:
-                    _LOGGER.debug("%s: skipping byte %#x", self.host, marker)
-                    continue
-                length = decode_length(await reader.readexactly(LENGTH_SIZE))
-                if length > MAX_BODY_SIZE:
-                    raise TemescalProtocolError(f"Frame too large: {length}")
-                body = await reader.readexactly(length)
-            self._last_received = loop.time()
+            marker = (await reader.readexactly(1))[0]
+            if marker != FRAME_MARKER:
+                _LOGGER.debug("%s: skipping byte %#x", self.host, marker)
+                continue
+            length = decode_length(await reader.readexactly(LENGTH_SIZE))
+            if length > MAX_BODY_SIZE:
+                raise TemescalProtocolError(f"Frame too large: {length}")
+            body = await reader.readexactly(length)
             try:
                 message = decode_body(body)
             except TemescalProtocolError as err:
@@ -251,21 +271,6 @@ class TemescalClient:
                 continue
             _LOGGER.debug("%s: received %s", self.host, message)
             self._dispatch(message)
-
-    async def _heartbeat(self) -> None:
-        loop = asyncio.get_running_loop()
-        while True:
-            idle = loop.time() - self._last_received
-            if idle < self._heartbeat_interval:
-                await asyncio.sleep(self._heartbeat_interval - idle)
-                continue
-            _LOGGER.debug("%s: sending heartbeat", self.host)
-            try:
-                await self.send(MSG_PRODUCT_INFO)
-            except TemescalConnectionError:
-                # The reader notices the silence and reconnects
-                return
-            await asyncio.sleep(self._heartbeat_interval)
 
     def _dispatch(self, message: dict[str, Any]) -> None:
         for future in self._pending.get(message.get("msg", ""), []):

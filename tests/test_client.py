@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncGenerator, Callable
+import socket
 
 import pytest
 
@@ -10,7 +11,6 @@ from aiotemescal import TemescalClient, TemescalConnectionError, TemescalTimeout
 from .conftest import FakeSoundbar, free_port
 
 FAST = {
-    "heartbeat_interval": 0.2,
     "response_timeout": 0.2,
     "connect_timeout": 0.5,
     "min_backoff": 0.05,
@@ -133,34 +133,63 @@ async def test_reconnect_after_device_closes(
     assert states == [False, True]
 
 
-async def test_silent_device_is_detected(
+async def test_idle_connection_stays_quiet(
     soundbar: FakeSoundbar, client: TemescalClient
 ) -> None:
-    """A power cut leaves a half-open connection that only the heartbeat detects."""
+    """Liveness is left to TCP keepalive, so nothing is sent while idle."""
     states: list[bool] = []
     client.subscribe_connection(states.append)
-
     soundbar.responsive = False
-    await wait_for(lambda: not client.connected)
-    assert states == [False]
 
-    soundbar.responsive = True
-    await wait_for(lambda: client.connected)
-    assert states == [False, True]
-
-
-async def test_heartbeat_keeps_an_idle_connection(
-    soundbar: FakeSoundbar, client: TemescalClient
-) -> None:
-    states: list[bool] = []
-    client.subscribe_connection(states.append)
-
-    await asyncio.sleep(1)
+    await asyncio.sleep(0.5)
 
     assert client.connected
     assert states == []
-    assert soundbar.received.qsize() >= 3
+    assert soundbar.received.empty()
     assert soundbar.connection_count == 1
+
+
+async def test_tcp_options(client: TemescalClient) -> None:
+    """The kernel is set up to notice quickly that the device lost power."""
+    assert client._writer is not None
+    sock: socket.socket = client._writer.get_extra_info("socket")
+
+    assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE)
+    assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == 5
+    assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == 1
+    assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == 2
+    assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 3000
+
+
+async def test_reconnect_now_skips_the_backoff() -> None:
+    soundbar = FakeSoundbar(free_port())
+    client = TemescalClient(
+        "127.0.0.1", soundbar.port, **{**FAST, "min_backoff": 30, "max_backoff": 30}
+    )
+    await client.start()
+    await asyncio.sleep(0.1)
+    await soundbar.start()
+
+    client.reconnect_now()
+    await wait_for(lambda: client.connected, timeout=1)
+
+    await client.stop()
+    await soundbar.stop()
+
+
+async def test_set_host_connects_to_the_new_address(soundbar: FakeSoundbar) -> None:
+    client = TemescalClient(
+        "127.0.0.2", soundbar.port, **{**FAST, "min_backoff": 30, "max_backoff": 30}
+    )
+    await client.start()
+    await asyncio.sleep(0.1)
+    assert not client.connected
+
+    client.set_host("127.0.0.1")
+    await wait_for(lambda: client.connected, timeout=1)
+
+    assert client.host == "127.0.0.1"
+    await client.stop()
 
 
 async def test_pending_request_fails_on_disconnect(

@@ -1,12 +1,10 @@
 """Read-only tests against a real soundbar.
 
-Nothing is changed on the device, but the heartbeat requests may light up its
-front display. The power cycle test needs someone to unplug the device and is
+Nothing is changed on the device. The power cycle test needs someone to unplug the device and is
 only run when TEMESCAL_POWER_CYCLE is set.
 """
 
 import asyncio
-from collections import Counter
 import os
 import time
 
@@ -68,26 +66,23 @@ async def test_volume_is_consistent(client: TemescalClient) -> None:
     assert data["i_vol_min"] <= data["i_vol"] <= data["i_vol_max"]
 
 
-async def test_heartbeat_keeps_the_connection() -> None:
-    """An idle connection survives several heartbeats."""
+async def test_idle_connection_is_kept() -> None:
+    """The device answers keepalive probes and never drops an idle connection."""
     assert HOST
-    interval = 3.0
-    client = TemescalClient(HOST, PORT, heartbeat_interval=interval)
-    received: Counter[str] = Counter()
+    client = TemescalClient(HOST, PORT)
     events: list[bool] = []
-    client.subscribe(lambda message: received.update([message.get("msg", "")]))
     client.subscribe_connection(events.append)
 
     await client.start()
     try:
         await wait_for_state(client, True, 10)
-        await asyncio.sleep(interval * 4)
+        # Several rounds of keepalive probes, which start after 5 s of silence
+        await asyncio.sleep(30)
         assert client.connected
     finally:
         await client.stop()
 
     assert events == [True, False]
-    assert received[MSG_PRODUCT_INFO] >= 3
 
 
 @pytest.mark.skipif(
