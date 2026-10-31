@@ -1,8 +1,9 @@
 """Tests for the temescal client against a fake soundbar."""
 
 import asyncio
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 import socket
+from typing import Any
 
 import pytest
 
@@ -46,14 +47,96 @@ async def test_request(soundbar: FakeSoundbar, client: TemescalClient) -> None:
     }
 
 
-async def test_set_command(soundbar: FakeSoundbar, client: TemescalClient) -> None:
-    await client.set_volume(12)
+@pytest.mark.parametrize(
+    ("action", "sent"),
+    [
+        pytest.param(
+            lambda client: client.set_volume(12),
+            {"cmd": "set", "msg": "SPK_LIST_VIEW_INFO", "data": {"i_vol": 12}},
+            id="set_volume",
+        ),
+        pytest.param(
+            lambda client: client.set_mute(True),
+            {"cmd": "set", "msg": "SPK_LIST_VIEW_INFO", "data": {"b_mute": True}},
+            id="set_mute",
+        ),
+        pytest.param(
+            lambda client: client.set_power(False),
+            {"cmd": "set", "msg": "SPK_LIST_VIEW_INFO", "data": {"b_powerkey": False}},
+            id="set_power",
+        ),
+        pytest.param(
+            lambda client: client.set_eq(19),
+            {"cmd": "set", "msg": "EQ_VIEW_INFO", "data": {"i_curr_eq": 19}},
+            id="set_eq",
+        ),
+        pytest.param(
+            lambda client: client.set_func(6),
+            {"cmd": "set", "msg": "FUNC_VIEW_INFO", "data": {"i_curr_func": 6}},
+            id="set_func",
+        ),
+        pytest.param(
+            lambda client: client.set_play_ctrl(True),
+            {"cmd": "set", "msg": "PLAY_INFO", "data": {"i_play_ctrl": 0}},
+            id="set_play_ctrl_play",
+        ),
+        pytest.param(
+            lambda client: client.set_play_ctrl(False),
+            {"cmd": "set", "msg": "PLAY_INFO", "data": {"i_play_ctrl": 1}},
+            id="set_play_ctrl_pause",
+        ),
+        pytest.param(
+            lambda client: client.set_setting("b_night_time", True),
+            {"cmd": "set", "msg": "SETTING_VIEW_INFO", "data": {"b_night_time": True}},
+            id="set_setting",
+        ),
+        pytest.param(
+            lambda client: client.get_eq(),
+            {"cmd": "get", "msg": "EQ_VIEW_INFO"},
+            id="get_eq",
+        ),
+        pytest.param(
+            lambda client: client.get_info(),
+            {"cmd": "get", "msg": "SPK_LIST_VIEW_INFO"},
+            id="get_info",
+        ),
+        pytest.param(
+            lambda client: client.get_play(),
+            {"cmd": "get", "msg": "PLAY_INFO"},
+            id="get_play",
+        ),
+        pytest.param(
+            lambda client: client.get_func(),
+            {"cmd": "get", "msg": "FUNC_VIEW_INFO"},
+            id="get_func",
+        ),
+        pytest.param(
+            lambda client: client.get_settings(),
+            {"cmd": "get", "msg": "SETTING_VIEW_INFO"},
+            id="get_settings",
+        ),
+        pytest.param(
+            lambda client: client.get_product_info(),
+            {"cmd": "get", "msg": "PRODUCT_INFO"},
+            id="get_product_info",
+        ),
+        pytest.param(
+            lambda client: client.get_mac_info(),
+            {"cmd": "get", "msg": "MAC_INFO_DEV"},
+            id="get_mac_info",
+        ),
+    ],
+)
+async def test_command(
+    soundbar: FakeSoundbar,
+    client: TemescalClient,
+    action: Callable[[TemescalClient], Awaitable[None]],
+    sent: dict[str, Any],
+) -> None:
+    """Each action sends the message the device expects."""
+    await action(client)
 
-    assert await soundbar.received.get() == {
-        "cmd": "set",
-        "msg": "SPK_LIST_VIEW_INFO",
-        "data": {"i_vol": 12},
-    }
+    assert await soundbar.received.get() == sent
 
 
 async def test_unsolicited_messages_reach_subscribers(

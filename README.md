@@ -89,6 +89,14 @@ make test-power-cycle TEMESCAL_HOST=192.168.1.127  # asks you to unplug and repl
 
 `TEMESCAL_PORT` overrides the default port 9741.
 
+## Tested devices
+
+| Model | Firmware (main / micom / Chromecast) |
+| --- | --- |
+| LG SP8YA | 2407090 / 2207202 / 1.56.310669 |
+
+The versions are those reported in `UPDATE_VIEW_INFO`.
+
 ## License
 
 Apache 2.0. Derived from python-temescal, Copyright 2018 Google LLC.
