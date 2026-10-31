@@ -83,6 +83,7 @@ device to see how quickly the loss and the return are detected.
 ```
 make test                                          # unit tests, against a fake soundbar
 make test-live TEMESCAL_HOST=192.168.1.127         # read-only tests against a real device
+make test-actions TEMESCAL_HOST=192.168.1.127      # changes and restores settings, input and power
 make test-power-cycle TEMESCAL_HOST=192.168.1.127  # asks you to unplug and replug it
 ```
 
