@@ -1,3 +1,7 @@
+# Derived from python-temescal by Matthew Garrett, Copyright 2018 Google LLC,
+# licensed under the Apache License, Version 2.0. Rewritten for asyncio by
+# Florent Thiéry.
+
 """Framing and encryption of temescal messages.
 
 A frame is a 0x10 marker, a big-endian 32-bit length and an AES-256-CBC

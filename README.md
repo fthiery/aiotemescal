@@ -97,6 +97,16 @@ make test-power-cycle TEMESCAL_HOST=192.168.1.127  # asks you to unplug and repl
 
 The versions are those reported in `UPDATE_VIEW_INFO`.
 
+## Credits
+
+The heavy lifting was done by [Matthew Garrett](https://github.com/mjg59), who
+wrote [python-temescal](https://github.com/google/python-temescal) and made the
+protocol usable from Python. The encryption key and IV, the message names and
+the equaliser and function tables of this library all come from that work,
+along with the additions of its contributors Berni Moses, teldri and
+tomasrollo. aiotemescal only adds an asyncio client around them.
+
 ## License
 
-Apache 2.0. Derived from python-temescal, Copyright 2018 Google LLC.
+Apache 2.0. Derived from python-temescal, Copyright 2018 Google LLC, also
+licensed under Apache 2.0. The files taken from it say so in their header.

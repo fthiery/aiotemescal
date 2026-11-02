@@ -1,3 +1,7 @@
+# Derived from python-temescal by Matthew Garrett, Copyright 2018 Google LLC,
+# licensed under the Apache License, Version 2.0. Rewritten for asyncio by
+# Florent Thiéry.
+
 """Constants of the temescal protocol."""
 
 DEFAULT_PORT = 9741
