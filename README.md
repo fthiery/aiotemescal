@@ -14,7 +14,8 @@ Features:
 - the connection is kept open in the background and re-established with an
   exponential backoff;
 - a power cut is noticed within seconds through tuned TCP keepalive and
-  `TCP_USER_TIMEOUT`, without any application traffic;
+  `TCP_USER_TIMEOUT`, without any application traffic (on Linux, see
+  [Power loss detection](#power-loss-detection));
 - the backoff can be skipped when you know the device is back, and the
   address can be changed without restarting the client;
 - after each connection, the whole state is requested and delivered to
@@ -68,9 +69,15 @@ from 1 to 5 s. If you learn by other means that the device is back, call
 A device that loses power stops acknowledging TCP packets. The client
 configures the socket so that the kernel closes such a connection after about
 7 s when idle (keepalive probes after 5 s of silence, every second, two
-missed), or 3 s after a command that is not acknowledged. These options exist on
-Linux; on other systems the defaults of the OS apply and detection can take much
-longer.
+missed), or 3 s after a command that is not acknowledged.
+
+**This relies on Linux socket options.** Each option is only set when Python
+exposes it on the running system, and `TCP_USER_TIMEOUT` only exists on Linux.
+Where an option is missing, the default of the operating system applies, which
+is often two hours of silence before the first keepalive probe. Since the client
+sends no application-level heartbeat, a device that loses power while the
+connection is idle can then go unnoticed for that long. Home Assistant OS and
+other Linux hosts are not affected.
 
 ## Debugging
 
