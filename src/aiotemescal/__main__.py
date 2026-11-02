@@ -6,35 +6,18 @@ import contextlib
 import logging
 from typing import Any
 
-from . import DEFAULT_PORT, TemescalClient, TemescalConnectionError
-
-
-async def _refresh(client: TemescalClient) -> None:
-    with contextlib.suppress(TemescalConnectionError):
-        for get in (
-            client.get_product_info,
-            client.get_info,
-            client.get_func,
-            client.get_eq,
-            client.get_settings,
-            client.get_play,
-        ):
-            await get()
+from . import DEFAULT_PORT, TemescalClient
 
 
 async def _main(args: argparse.Namespace) -> None:
     client = TemescalClient(args.host, args.port)
-    refreshes: set[asyncio.Task[None]] = set()
 
     def on_message(message: dict[str, Any]) -> None:
         print(f"<- {message}", flush=True)
 
     def on_connection(connected: bool) -> None:
+        # The state the client requests on connection is printed just before
         print("== connected" if connected else "== disconnected", flush=True)
-        if connected:
-            task = asyncio.create_task(_refresh(client))
-            refreshes.add(task)
-            task.add_done_callback(refreshes.discard)
 
     client.subscribe(on_message)
     client.subscribe_connection(on_connection)
