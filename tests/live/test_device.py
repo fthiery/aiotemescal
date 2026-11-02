@@ -32,7 +32,9 @@ STATE_MESSAGES = (
 )
 
 
-async def wait_for_state(client: TemescalClient, connected: bool, timeout: float) -> float:
+async def wait_for_state(
+    client: TemescalClient, connected: bool, timeout: float
+) -> float:
     """Wait for a connection state and return how long it took."""
     start = time.monotonic()
     async with asyncio.timeout(timeout):

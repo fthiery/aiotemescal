@@ -17,6 +17,9 @@ Features:
   `TCP_USER_TIMEOUT`, without any application traffic;
 - the backoff can be skipped when you know the device is back, and the
   address can be changed without restarting the client;
+- after each connection, the whole state is requested and delivered to
+  subscribers before the connection is reported, so a device that comes back
+  is never shown with the state it had before;
 - connection state changes are reported to subscribers;
 - requests can be awaited for their answer.
 

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from aiotemescal import TemescalClient, TemescalConnectionError, TemescalTimeoutError
+from aiotemescal.client import STATE_MESSAGES
 
 from .conftest import FakeSoundbar, free_port
 
@@ -32,6 +33,9 @@ async def client(soundbar: FakeSoundbar) -> AsyncGenerator[TemescalClient]:
     client = TemescalClient("127.0.0.1", soundbar.port, **FAST)
     await client.start()
     await wait_for(lambda: client.connected)
+    # Leave out the state requests sent when connecting
+    while not soundbar.received.empty():
+        soundbar.received.get_nowait()
     yield client
     await client.stop()
 
@@ -318,3 +322,58 @@ async def test_stop_leaves_no_task(soundbar: FakeSoundbar) -> None:
         for task in asyncio.all_tasks()
         if task.get_name().startswith("aiotemescal")
     ] == []
+
+
+async def test_connection_reported_once_state_is_answered(
+    soundbar: FakeSoundbar,
+) -> None:
+    """Subscribers get the fresh state before the connection is reported."""
+    soundbar.answers["SPK_LIST_VIEW_INFO"] = {"i_vol": 7}
+    client = TemescalClient("127.0.0.1", soundbar.port, **FAST)
+    events: list[Any] = []
+    client.subscribe(lambda message: events.append(message["msg"]))
+    client.subscribe_connection(events.append)
+
+    await client.start()
+    await wait_for(lambda: client.connected)
+
+    assert sorted(events[:-1]) == sorted(STATE_MESSAGES)
+    assert events[-1] is True
+    assert sorted(
+        soundbar.received.get_nowait()["msg"] for _ in STATE_MESSAGES
+    ) == sorted(STATE_MESSAGES)
+    await client.stop()
+
+
+async def test_unanswered_state_requests_time_out(soundbar: FakeSoundbar) -> None:
+    """A device that ignores the state requests is reported after the timeout."""
+    soundbar.responsive = False
+    client = TemescalClient("127.0.0.1", soundbar.port, **FAST)
+
+    await client.start()
+    await wait_for(lambda: soundbar.connection_count == 1)
+    assert not client.connected
+
+    await wait_for(lambda: client.connected, timeout=1)
+    await client.stop()
+
+
+async def test_connection_lost_before_state_is_answered(
+    soundbar: FakeSoundbar,
+) -> None:
+    """A connection lost while requesting the state is never reported."""
+    soundbar.responsive = False
+    client = TemescalClient(
+        "127.0.0.1", soundbar.port, **{**FAST, "response_timeout": 5}
+    )
+    states: list[bool] = []
+    client.subscribe_connection(states.append)
+
+    await client.start()
+    await soundbar.received.get()
+    await soundbar.stop()
+    await asyncio.sleep(0.2)
+
+    assert states == []
+    assert not client.connected
+    await client.stop()

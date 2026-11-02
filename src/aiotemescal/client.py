@@ -54,6 +54,16 @@ type ConnectionCallback = Callable[[bool], None]
 
 _SESSION_ERRORS = (OSError, asyncio.IncompleteReadError, TemescalProtocolError)
 
+# Asked for after each connection, which is only reported once they are answered,
+# so subscribers never see a reconnected device with the state it had before
+STATE_MESSAGES = (
+    MSG_SPK_LIST_VIEW_INFO,
+    MSG_FUNC_VIEW_INFO,
+    MSG_EQ_VIEW_INFO,
+    MSG_SETTING_VIEW_INFO,
+    MSG_PLAY_INFO,
+)
+
 
 class TemescalClient:
     """Connection to an LG soundbar.
@@ -81,6 +91,7 @@ class TemescalClient:
         self._max_backoff = max_backoff
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
+        self._ready = False
         self._task: asyncio.Task[None] | None = None
         self._wake = asyncio.Event()
         self._pending: dict[str, list[asyncio.Future[dict[str, Any]]]] = {}
@@ -89,8 +100,8 @@ class TemescalClient:
 
     @property
     def connected(self) -> bool:
-        """Return whether the device is currently connected."""
-        return self._writer is not None
+        """Return whether the device is connected and its state was requested."""
+        return self._ready
 
     def subscribe(self, callback: MessageCallback) -> Callable[[], None]:
         """Call back with every message received; return an unsubscribe function."""
@@ -120,6 +131,7 @@ class TemescalClient:
     async def connect(self) -> None:
         """Connect once, without reconnecting if the connection is lost."""
         await self._open()
+        self._set_ready()
         self._task = asyncio.create_task(
             self._serve_once(), name=f"aiotemescal {self.host}"
         )
@@ -198,13 +210,33 @@ class TemescalClient:
                     backoff = min(backoff * 2, self._max_backoff)
                 continue
             backoff = self._min_backoff
+            refresh = asyncio.create_task(
+                self._refresh(), name=f"aiotemescal {self.host} refresh"
+            )
             try:
                 await self._read_frames()
             except _SESSION_ERRORS as err:
                 _LOGGER.debug("%s: connection lost: %r", self.host, err)
             finally:
+                refresh.cancel()
                 self._close()
+                await asyncio.wait([refresh])
             await self._wait(backoff)
+
+    async def _refresh(self) -> None:
+        """Request the whole state, then report the connection.
+
+        Models that do not answer some of the requests time out, which is fine.
+        A lost connection cancels the refresh before anything is reported.
+        """
+        await asyncio.gather(
+            *(self.request(msg) for msg in STATE_MESSAGES), return_exceptions=True
+        )
+        self._set_ready()
+
+    def _set_ready(self) -> None:
+        self._ready = True
+        self._notify_connection(True)
 
     async def _wait(self, delay: float) -> bool:
         """Sleep for the delay; return whether reconnect_now() cut it short."""
@@ -239,12 +271,12 @@ class TemescalClient:
                     sock.setsockopt(socket.IPPROTO_TCP, option, value)
         self._reader, self._writer = reader, writer
         _LOGGER.debug("Connected to %s:%s", self.host, self.port)
-        self._notify_connection(True)
 
     def _close(self) -> None:
         if (writer := self._writer) is None:
             return
         self._reader = self._writer = None
+        was_ready, self._ready = self._ready, False
         # abort() rather than close(): a powered-off device never acknowledges
         writer.transport.abort()
         for futures in self._pending.values():
@@ -254,7 +286,8 @@ class TemescalClient:
                         TemescalConnectionError(f"Connection to {self.host} lost")
                     )
         _LOGGER.debug("Disconnected from %s", self.host)
-        self._notify_connection(False)
+        if was_ready:
+            self._notify_connection(False)
 
     async def _read_frames(self) -> None:
         if (reader := self._reader) is None:
