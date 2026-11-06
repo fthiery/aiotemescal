@@ -64,6 +64,17 @@ from 1 to 5 s. If you learn by other means that the device is back, call
 `reconnect_now()` to retry right away; it does nothing while connected.
 `set_host()` changes the address of the device and retries right away.
 
+### Daily restart
+
+Expect a short disconnection every night. The tested SP8YA restarts by itself
+once a day: on the four nights observed, between about 04:00 and 04:20 local
+time. It leaves the network for about 20 s, then refuses connections for a few
+more seconds while it boots, and the client is connected again about 30 s after
+the connection was lost. The Chromecast built into the soundbar drops at the same
+moment, so the restart comes from the device, not from the client. An
+application that shows whether the device is connected will show it as
+unavailable during that time.
+
 ## Power loss detection
 
 A device that loses power stops acknowledging TCP packets. The client
