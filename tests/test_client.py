@@ -4,11 +4,12 @@ import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
 import socket
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 from aiotemescal import TemescalClient, TemescalConnectionError, TemescalTimeoutError
-from aiotemescal.client import STATE_MESSAGES
+from aiotemescal.client import STATE_MESSAGES, _unacknowledged
 
 from .conftest import FakeSoundbar, free_port
 
@@ -377,3 +378,55 @@ async def test_connection_lost_before_state_is_answered(
     assert states == []
     assert not client.connected
     await client.stop()
+
+
+async def test_command_waits_for_acknowledgement(
+    soundbar: FakeSoundbar, client: TemescalClient
+) -> None:
+    """A command returns once the device acknowledged every byte sent."""
+    with patch(
+        "aiotemescal.client._unacknowledged", side_effect=[64, 64, 0]
+    ) as unacknowledged:
+        await client.set_volume(12)
+
+    assert unacknowledged.call_count == 3
+
+
+async def test_unacknowledged_command_times_out(
+    soundbar: FakeSoundbar, client: TemescalClient
+) -> None:
+    """A command the device never acknowledges fails instead of being lost."""
+    with (
+        patch("aiotemescal.client._unacknowledged", return_value=64),
+        pytest.raises(TemescalTimeoutError),
+    ):
+        await client.set_volume(12)
+
+
+async def test_connection_lost_before_acknowledgement(soundbar: FakeSoundbar) -> None:
+    """A connection lost while waiting for the acknowledgement fails the command."""
+    client = TemescalClient(
+        "127.0.0.1", soundbar.port, **{**FAST, "response_timeout": 5}
+    )
+    await client.start()
+    await wait_for(lambda: client.connected)
+
+    with patch("aiotemescal.client._unacknowledged", return_value=64):
+        command = asyncio.create_task(client.set_volume(12))
+        await asyncio.sleep(0.05)
+        await soundbar.stop()
+        with pytest.raises(TemescalConnectionError) as err:
+            await command
+
+    assert err.type is TemescalConnectionError
+    await client.stop()
+
+
+async def test_idle_socket_has_nothing_unacknowledged(
+    soundbar: FakeSoundbar, client: TemescalClient
+) -> None:
+    """The kernel reports everything sent as acknowledged once answered."""
+    await client.request("EQ_VIEW_INFO")
+    assert client._writer is not None
+
+    assert _unacknowledged(client._writer.get_extra_info("socket")) == 0

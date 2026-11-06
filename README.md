@@ -52,7 +52,7 @@ async with TemescalClient("192.168.1.15") as client:
 ```
 
 `request()` and `send()` raise `TemescalConnectionError` when the device is not
-connected, and `request()` raises `TemescalTimeoutError` when no answer arrives.
+connected or does not acknowledge them, and `request()` raises `TemescalTimeoutError` when no answer arrives.
 
 Every message received from the device is delivered to the `subscribe()`
 callbacks, including answers to requests and unsolicited status updates.
@@ -81,6 +81,11 @@ A device that loses power stops acknowledging TCP packets. The client
 configures the socket so that the kernel closes such a connection after about
 7 s when idle (keepalive probes after 5 s of silence, every second, two
 missed), or 3 s after a command that is not acknowledged.
+
+Commands wait for the device to acknowledge them at the TCP level before
+returning, which takes a few milliseconds on a local network. A command sent to
+a device that just lost power therefore raises `TemescalConnectionError` once
+the connection is closed, instead of returning as if it had been delivered.
 
 **This relies on Linux socket options.** Each option is only set when Python
 exposes it on the running system, and `TCP_USER_TIMEOUT` only exists on Linux.

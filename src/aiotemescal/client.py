@@ -8,6 +8,8 @@ import asyncio
 from collections.abc import Callable
 import logging
 import socket
+import struct
+import sys
 from types import TracebackType
 from typing import Any, Self
 
@@ -42,6 +44,13 @@ MAX_BODY_SIZE = 1 << 20
 # A device that loses power stops acknowledging, so the kernel detects it without
 # any application traffic: idle connections after 5 + 2 * 1 s of keepalive probes,
 # and connections with unacknowledged data (a command just sent) after 3 s
+if sys.platform == "linux":
+    import fcntl
+    import termios
+
+# How often to check whether the device acknowledged a command
+_ACK_POLL_INTERVAL = 0.01
+
 _TCP_OPTIONS = (
     ("TCP_KEEPIDLE", 5),
     ("TCP_KEEPINTVL", 1),
@@ -171,6 +180,33 @@ class TemescalClient:
         try:
             writer.write(encode_frame(payload))
             await writer.drain()
+        except OSError as err:
+            raise TemescalConnectionError(
+                f"Cannot send to {self.host}: {err!r}"
+            ) from err
+        await self._wait_acknowledged(writer)
+
+    async def _wait_acknowledged(self, writer: asyncio.StreamWriter) -> None:
+        """Wait until the device acknowledged everything sent, on Linux.
+
+        A drained buffer only means the kernel took the data: a device that just
+        lost power acknowledges nothing, and TCP_USER_TIMEOUT then closes the
+        connection, which makes the command fail instead of being lost.
+        """
+        if sys.platform != "linux" or (sock := writer.get_extra_info("socket")) is None:
+            return
+        try:
+            async with asyncio.timeout(self._response_timeout):
+                while True:
+                    if self._writer is not writer:
+                        raise TemescalConnectionError(f"Connection to {self.host} lost")
+                    if not _unacknowledged(sock):
+                        return
+                    await asyncio.sleep(_ACK_POLL_INTERVAL)
+        except TimeoutError as err:
+            raise TemescalTimeoutError(
+                f"{self.host} did not acknowledge the command"
+            ) from err
         except OSError as err:
             raise TemescalConnectionError(
                 f"Cannot send to {self.host}: {err!r}"
@@ -381,6 +417,14 @@ class TemescalClient:
     async def set_setting(self, key: str, value: Any) -> None:
         """Change a SETTING_VIEW_INFO value such as b_night_mode or i_woofer_level."""
         await self.send(MSG_SETTING_VIEW_INFO, {key: value}, "set")
+
+
+def _unacknowledged(sock: socket.socket) -> int:
+    """Return how many bytes sent on the socket the peer did not acknowledge yet."""
+    (count,) = struct.unpack(
+        "i", fcntl.ioctl(sock.fileno(), termios.TIOCOUTQ, bytes(4))
+    )
+    return int(count)
 
 
 def _register[T](callbacks: list[T], callback: T) -> Callable[[], None]:
