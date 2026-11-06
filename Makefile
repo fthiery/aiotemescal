@@ -15,7 +15,7 @@ test-actions: check-host
 	TEMESCAL_HOST=$(TEMESCAL_HOST) TEMESCAL_PORT=$(TEMESCAL_PORT) TEMESCAL_ACTIONS=1 \
 		uv run pytest tests/live/test_actions.py -v -s
 
-# Interactive: asks you to unplug the soundbar and plug it back in
+# Interactive: asks you twice to unplug the soundbar and plug it back in
 test-power-cycle: check-host
 	TEMESCAL_HOST=$(TEMESCAL_HOST) TEMESCAL_PORT=$(TEMESCAL_PORT) TEMESCAL_POWER_CYCLE=1 \
 		uv run pytest tests/live -v -s -k test_power_cycle

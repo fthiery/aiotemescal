@@ -1,12 +1,13 @@
 """Read-only tests against a real soundbar.
 
-Nothing is changed on the device. The power cycle test needs someone to unplug the device and is
-only run when TEMESCAL_POWER_CYCLE is set.
+Nothing is changed on the device. The power cycle tests need someone to unplug the device, once
+each, and are only run when TEMESCAL_POWER_CYCLE is set.
 """
 
 import asyncio
 import os
 import time
+from typing import Any
 
 import pytest
 
@@ -18,6 +19,7 @@ from aiotemescal import (
     MSG_SETTING_VIEW_INFO,
     MSG_SPK_LIST_VIEW_INFO,
     TemescalClient,
+    TemescalConnectionError,
 )
 
 from .conftest import HOST, PORT
@@ -108,3 +110,50 @@ async def test_power_cycle() -> None:
         await client.stop()
 
     assert answer["data"]["s_user_name"]
+
+
+@pytest.mark.skipif(
+    not os.environ.get("TEMESCAL_POWER_CYCLE"),
+    reason="TEMESCAL_POWER_CYCLE is not set",
+)
+async def test_power_cycle_command_fails() -> None:
+    """A command sent just after a power cut raises instead of being lost.
+
+    A read command is sent every half second. Each one that returns was
+    delivered, so it must be answered; once the power is cut, the command in
+    flight must raise instead.
+    """
+    assert HOST
+    client = TemescalClient(HOST, PORT)
+    answered = asyncio.Event()
+
+    def on_message(message: dict[str, Any]) -> None:
+        if message["msg"] == MSG_SPK_LIST_VIEW_INFO:
+            answered.set()
+
+    client.subscribe(on_message)
+    await client.start()
+    try:
+        await wait_for_state(client, True, 300)
+        print("\n>>> Connected. Cut the power of the soundbar now.", flush=True)
+        async with asyncio.timeout(180):
+            while True:
+                answered.clear()
+                start = time.monotonic()
+                try:
+                    await client.get_info()
+                except TemescalConnectionError as err:
+                    error, failed = err, time.monotonic() - start
+                    break
+                async with asyncio.timeout(2):
+                    await answered.wait()
+                await asyncio.sleep(0.5)
+        print(f">>> The command failed after {failed:.1f} s: {error}", flush=True)
+        print(">>> Power it back on.", flush=True)
+        await wait_for_state(client, True, 300)
+    finally:
+        await client.stop()
+
+    # The command was in flight, not refused because the loss was already known
+    assert "Not connected" not in str(error)
+    assert failed < 5
