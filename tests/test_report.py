@@ -171,7 +171,7 @@ def test_render_standby_lost() -> None:
 async def test_gather_guided(soundbar: FakeSoundbar) -> None:
     """Guided mode reads the state when on and in standby, and records pushed messages."""
     soundbar.answers["FUNC_VIEW_INFO"] = {"b_connect": True}
-    answers = iter(["", "y", "n", "", ""])
+    answers = iter(["", "y", "n", "", "", "y"])
 
     async def ask(prompt: str) -> str:
         if "standby the way" in prompt:
@@ -197,7 +197,7 @@ async def test_gather_guided(soundbar: FakeSoundbar) -> None:
     assert diff(report.on, report.standby) == [
         ("FUNC_VIEW_INFO", "b_connect", True, False)
     ]
-    assert list(report.power_answers.values()) == ["yes", "no"]
+    assert list(report.power_answers.values()) == ["yes", "no", "yes"]
     events = [(event, data) for _, event, data in report.timeline]
     assert ("sent set_power(False)", None) in events
     assert ("`FUNC_VIEW_INFO`", {"b_connect": False}) in events
@@ -238,7 +238,12 @@ async def _drain(soundbar: FakeSoundbar):  # type: ignore[no-untyped-def]
 )
 def test_cli_dispatch(argv: list[str], target: str, expected: list[str] | None) -> None:
     """`report` runs the report, and a host alone still runs the watcher."""
-    with patch(target) as mock, patch("aiotemescal.__main__.asyncio.run"):
+    with (
+        patch(target) as mock,
+        patch(
+            "aiotemescal.__main__.asyncio.run", side_effect=lambda coro: coro.close()
+        ),
+    ):
         main(argv)
 
     if expected is not None:
