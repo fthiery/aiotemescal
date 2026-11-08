@@ -75,6 +75,44 @@ moment, so the restart comes from the device, not from the client. An
 application that shows whether the device is connected will show it as
 unavailable during that time.
 
+### Internet access
+
+Do not cut the soundbar off from the internet. The tested SP8YA keeps working
+for a while without it, but on 2026-11-08, after its router blocked its
+internet access (but not the local network), it left the network as soon as
+the TV was turned off. Just before, `C4A_SETTING_INFO` had reported `i_agree`
+going from 1 to 0, so the built-in Chromecast seems to have reset. A few
+minutes later the soundbar went to full standby (0 W instead of the usual
+4 W network standby). When the TV was turned back on, it answered ping again,
+but it refused connections on port 9741 and did not wake up with the TV. Once
+its internet access was restored, it opened port 9741 within seconds, `i_agree`
+went back to 1, and the client reconnected without any action. Nothing the
+client does can work around this: the device has to be reachable on the
+internet, at least by the Google servers the Chromecast checks.
+
+## Power
+
+The tested SP8YA does not support remote power control:
+
+- it never sends `b_powerstatus`, in any message, so its power state cannot be
+  read directly;
+- it ignores `set_power()` (the `b_powerkey` key) whether it is on or in
+  standby, with either value, and sends no answer. The LG app has no power
+  button for it either.
+
+It turns on and off by following the TV over HDMI eARC, with `b_auto_power`
+enabled in `SETTING_VIEW_INFO`. On each change it sends `FUNC_VIEW_INFO`
+unprompted, followed by `SPK_LIST_VIEW_INFO` and `PLAY_INFO`:
+
+| State | Power draw | `b_connect` | `i_curr_func` |
+| --- | --- | --- | --- |
+| On | 11-12 W | `True` | 20 (E-ARC) |
+| Network standby | about 4 W | `False` | 4 (Optical) |
+
+Comparing the full state in both cases, only these two fields change.
+`b_connect` is therefore the only hint of the power state, but it has only
+been observed with the TV as the source, not with Bluetooth or Wi-Fi playback.
+
 ## Power loss detection
 
 A device that loses power stops acknowledging TCP packets. The client
