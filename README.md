@@ -64,8 +64,8 @@ from 1 to 5 s. If you learn by other means that the device is back, call
 `reconnect_now()` to retry right away; it does nothing while connected.
 `set_host()` changes the address of the device and retries right away.
 
-A device can also disconnect on its own; see [LG SP8YA](#lg-sp8ya) for the
-cases observed on the tested soundbar.
+A device can also disconnect on its own; the [device pages](#tested-devices)
+list the cases observed on each model.
 
 ## Power loss detection
 
@@ -109,79 +109,165 @@ make test-power-cycle TEMESCAL_HOST=192.168.1.127  # asks you to unplug and repl
 
 ## Tested devices
 
-| Model | Firmware (main / micom / Chromecast) |
-| --- | --- |
-| LG SP8YA | 2407090 / 2207202 / 1.56.310669 |
+| Model | Firmware (main / micom / Chromecast) | Notes |
+| --- | --- | --- |
+| LG SP8YA | 2407090 / 2207202 / 1.56.310669 | [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md) |
 
-The versions are those reported in `UPDATE_VIEW_INFO`.
+The versions are those reported in `UPDATE_VIEW_INFO`. Each device page
+gathers what was learned on that model: how it identifies itself, when it
+disconnects by itself, and what it supports, such as power control.
 
-## LG SP8YA
+## Contributing
 
-What was learned on the tested SP8YA (firmware above), which may or may not
-apply to other models.
+Only one model has been tested so far, and models differ: some report their
+power state and others do not, some offer inputs or sound modes that have no
+name in this library yet. A report from your device is the most useful
+contribution, even if everything works.
 
-### Identification and startup
+### Report your device
 
-- `PRODUCT_INFO` reports `s_model_name: "SP8YA"`. The device never reports
-  `s_uuid` and does not answer `MAC_INFO_DEV`.
-- It advertises itself over mDNS as
-  `LG_SMART_AUDIO-<uuid>._lg-smart-device._tcp.local.`, with the UUID and the
-  IPv4 address in the TXT record, under the generic host name
-  `audiocast.local`.
-- When it boots, port 9741 opens 10 to 32 s after the device first answers
-  ping, and connections are refused until then.
-- It answers TCP keepalive probes and keeps an idle connection open without
-  any application traffic (tested for 3 minutes), which is what
-  [Power loss detection](#power-loss-detection) relies on.
+With [uv](https://docs.astral.sh/uv/), from any machine on the same network as
+the device:
 
-### Daily restart
+```
+uvx aiotemescal report 192.168.1.15                         # read-only
+uvx aiotemescal report 192.168.1.15 --guided                # asks you to turn it on, then to standby
+uvx aiotemescal report 192.168.1.15 --guided --try-power    # also tries the power commands
+```
 
-Expect a short disconnection every night. It restarts by itself once a day:
-on the four nights observed, between about 04:00 and 04:20 local time. It
-leaves the network for about 20 s, then refuses connections for a few more
-seconds while it boots, and the client is connected again about 30 s after the
-connection was lost. The Chromecast built into the soundbar drops at the same
-moment, so the restart comes from the device, not from the client. An
-application that shows whether the device is connected will show it as
-unavailable during that time.
+- Without options, the report only asks the device for its state: nothing is
+  changed. It lists what the device reports, the inputs and sound modes it
+  offers, and the messages it does not answer.
+- `--guided` asks you to turn the device on, then to put it in standby the way
+  you usually do (TV off, remote), and compares its full state in both cases.
+  It also records every message the device sends by itself in the meantime.
+  This shows whether, and how, its power state can be followed.
+- `--try-power` also sends the power commands, which turn the device off and
+  on, and asks you whether they worked. It is the only option that changes the
+  device.
 
-### Internet access
+The report is printed as Markdown, ready to paste (`-o FILE` writes it to a
+file). IP addresses, MAC addresses, UUIDs and the names you gave the device are
+replaced with `<redacted>`; `--no-redact` keeps them. Read it before posting.
 
-Do not cut the soundbar off from the internet. It keeps working for a while
-without it, but on 2026-11-08, after its router blocked its internet access
-(but not the local network), it left the network as soon as the TV was turned
-off. Just before, `C4A_SETTING_INFO` had reported `i_agree`
-going from 1 to 0, so the built-in Chromecast seems to have reset. A few
-minutes later the soundbar went to full standby (0 W instead of the usual
-4 W network standby). When the TV was turned back on, it answered ping again,
-but it refused connections on port 9741 and did not wake up with the TV. Once
-its internet access was restored, it opened port 9741 within seconds, `i_agree`
-went back to 1, and the client reconnected without any action. Nothing the
-client does can work around this: the device has to be reachable on the
-internet, at least by the Google servers the Chromecast checks.
+Then [open an issue](https://github.com/fthiery/aiotemescal//issues/new?template=device_report.md)
+with the report, and anything you noticed that the report cannot see: how the
+device is connected to the TV, whether it loses the connection by itself, what
+the LG app shows for an unknown sound mode.
 
-### Power
+Example, a read-only report of the tested SP8YA while in standby:
 
-It does not support remote power control:
+````markdown
+## aiotemescal device report
 
-- it never sends `b_powerstatus`, in any message, so its power state cannot be
-  read directly;
-- it ignores `set_power()` (the `b_powerkey` key) whether it is on or in
-  standby, with either value, and sends no answer. The LG app has no power
-  button for it either.
+aiotemescal 0.4.0, Python 3.14.10, Linux x86_64
 
-It turns on and off by following the TV over HDMI eARC, with `b_auto_power`
-enabled in `SETTING_VIEW_INFO`. On each change it sends `FUNC_VIEW_INFO`
-unprompted, followed by `SPK_LIST_VIEW_INFO` and `PLAY_INFO`:
+### Findings
 
-| State | Power draw | `b_connect` | `i_curr_func` |
-| --- | --- | --- | --- |
-| On | 11-12 W | `True` | 20 (E-ARC) |
-| Network standby | about 4 W | `False` | 4 (Optical) |
+- Model: SP8YA
+- Firmware (main / micom / Chromecast): 2407090 / 2207202 / 1.56.310669
+- Power state: not reported (no `b_powerstatus`), run with --guided to find out which fields change between on and standby
+- Unique id: not reported (no `s_uuid`)
+- Inputs offered: 0 (Wi-Fi), 1 (Bluetooth), 15 (Optical/HDMI ARC), 6 (HDMI), 19 (USB2)
+- Sound modes offered: 19 (AI Sound Pro), 0 (Standard), 7 (Cinema), 20 (Clear Voice), 21 (Sports), 6 (Music), 22 (Game), 14 (Bass Blast), 5 (User), 15 (Dolby Atmos), 23 (unknown)
+- Sound modes without a name in aiotemescal: 23
+- Current input: 4 (Optical)
+- No answer to: `MAC_INFO_DEV`
 
-Comparing the full state in both cases, only these two fields change.
-`b_connect` is therefore the only hint of the power state, but it has only
-been observed with the TV as the source, not with Bluetooth or Wi-Fi playback.
+<details><summary>Full state</summary>
+
+```text
+# current
+(shortened: one line per message, for all nine messages)
+FUNC_VIEW_INFO: {"ai_func_list": [0, 1, 15, 6, 19], "b_connect": false, "i_curr_func": 4, "s_spk_bt_name": "<redacted>"}
+PRODUCT_INFO: {"i_model_no": 0, "i_model_type": 0, "i_network_type": 1, "s_model_name": "SP8YA"}
+```
+
+</details>
+````
+
+### Add a device page
+
+To document a model, copy [`docs/devices/_template.md`](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/_template.md)
+to `docs/devices/lg-<model>.md`, fill it from the report and your observations,
+and add a row to the table above. [`docs/devices/lg-sp8ya.md`](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md)
+is an example.
+
+### Test against your device
+
+If you clone the repository, the [live tests](#tests) check the client against
+a real device: `make test-live` is read-only, `make test-actions` changes
+settings and restores them, and `make test-power-cycle` needs you to unplug the
+device.
+
+## Future work
+
+### Devices without power control
+
+Some soundbars, like the [SP8YA](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md#power), do not
+implement power control: they never report `b_powerstatus` and ignore
+`set_power()` without answering. The client currently sends the command
+anyway, and an application cannot tell whether it did anything. This needs
+to be handled:
+
+- tell whether a device supports power control, from whether it reports
+  `b_powerstatus`, so that applications can hide their power button;
+- where it is reliable, follow the power state from other fields, such as
+  `b_connect` on the SP8YA (only confirmed with the TV as the source so far).
+
+Reports from other models (see [Contributing](#contributing)) are needed to
+know which models are affected and which fields can be trusted.
+
+### Unknown inputs and sound modes
+
+The input and sound mode tables come from python-temescal and stop at the
+models it knew. The [SP8YA](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md#inputs-and-sound-modes)
+offers sound mode 23, which has no name yet; applications show it as unknown.
+Its name has to be found, for example as shown in the LG app, and added to
+`equalisers` in `const.py`, along with any index reported by other models.
+The report lists these indices under "without a name in aiotemescal".
+
+### Support for more models
+
+Only the SP8YA has been tested, and the client assumes every model behaves the
+same. Supporting more models means:
+
+- turning the reports people send (see [Contributing](#contributing)) into
+  test fixtures, by loading the state of a report into the fake soundbar of
+  the tests, so that the behaviour of each model stays covered without the
+  device;
+- telling applications what a model supports, starting with power control
+  (see above), instead of each application finding out by itself;
+- completing the input and sound mode tables (see above).
+
+### Power loss detection outside Linux
+
+On macOS and Windows the client keeps the keepalive settings of the operating
+system, so a device that loses power can go unnoticed for up to two hours (see
+[Power loss detection](#power-loss-detection)). Both systems have equivalents
+of the Linux options: `TCP_KEEPALIVE`, `TCP_KEEPINTVL` and `TCP_KEEPCNT` on
+macOS, the `SIO_KEEPALIVE_VALS` ioctl on Windows. Neither has
+`TCP_USER_TIMEOUT`, so commands sent to a device that just lost power may take
+longer to fail.
+
+### Identity from mDNS
+
+Some devices give no stable identifier over the protocol: the SP8YA never
+reports `s_uuid` and does not answer `MAC_INFO_DEV`. They do advertise one over
+mDNS, as `LG_SMART_AUDIO-<uuid>._lg-smart-device._tcp.local.` with the UUID and
+the IPv4 address in the TXT record. A helper that reads the UUID and the
+address from such an announcement would spare each application from parsing
+it.
+
+### Stream desynchronisation
+
+The client looks for the marker byte of the next frame and skips anything
+else. On 2026-11-07 a long run of `skipping byte` debug messages was logged
+with the SP8YA: the client had lost the start of a frame and skipped its
+content byte by byte until it found a marker, which may also have been a byte
+inside the frame rather than the start of the next one. The cause is not
+known. It should be investigated, and reconnecting may be safer than searching
+the stream for the next frame.
 
 ## Credits
 
