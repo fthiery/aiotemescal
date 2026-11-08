@@ -3,6 +3,7 @@
 from .client import TemescalClient
 from .const import (
     DEFAULT_PORT,
+    MSG_C4A_SETTING_INFO,
     MSG_EQ_VIEW_INFO,
     MSG_FUNC_VIEW_INFO,
     MSG_MAC_INFO_DEV,
@@ -10,6 +11,7 @@ from .const import (
     MSG_PRODUCT_INFO,
     MSG_SETTING_VIEW_INFO,
     MSG_SPK_LIST_VIEW_INFO,
+    MSG_UPDATE_VIEW_INFO,
     equalisers,
     functions,
     play_control_states,
@@ -24,6 +26,7 @@ from .exceptions import (
 
 __all__ = [
     "DEFAULT_PORT",
+    "MSG_C4A_SETTING_INFO",
     "MSG_EQ_VIEW_INFO",
     "MSG_FUNC_VIEW_INFO",
     "MSG_MAC_INFO_DEV",
@@ -31,6 +34,7 @@ __all__ = [
     "MSG_PRODUCT_INFO",
     "MSG_SETTING_VIEW_INFO",
     "MSG_SPK_LIST_VIEW_INFO",
+    "MSG_UPDATE_VIEW_INFO",
     "TemescalClient",
     "TemescalConnectionError",
     "TemescalError",

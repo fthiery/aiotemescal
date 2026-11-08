@@ -25,6 +25,8 @@ class FakeSoundbar:
         self.answers: dict[str, dict[str, Any]] = {}
         # False makes the device ignore requests while keeping the connection open
         self.responsive = True
+        # Message types the device never answers, like MAC_INFO_DEV on the SP8YA
+        self.ignored: set[str] = set()
         self.received: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._server: asyncio.Server | None = None
         self._writers: list[asyncio.StreamWriter] = []
@@ -61,7 +63,7 @@ class FakeSoundbar:
                 length = decode_length(await reader.readexactly(LENGTH_SIZE))
                 message = decode_body(await reader.readexactly(length))
                 await self.received.put(message)
-                if self.responsive:
+                if self.responsive and message["msg"] not in self.ignored:
                     answer = {"msg": message["msg"]}
                     if (data := self.answers.get(message["msg"])) is not None:
                         answer["data"] = data
