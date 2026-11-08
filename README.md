@@ -5,15 +5,16 @@ protocol used by the LG Wi-Fi Speaker app (TCP port 9741).
 
 It is a rewrite of [python-temescal](https://github.com/google/python-temescal),
 which was not designed for devices that are only intermittently present on the
-network, for example a soundbar powered through a smart plug. It is used by the
-[LG Soundbars](https://www.home-assistant.io/integrations/lg_soundbar)
+network, for example a soundbar powered through a smart plug. python-temescal
+has been archived, read-only, since 2023, so this project takes over its
+maintenance. Beyond the rewrite, it aims at handling each model as it really
+behaves: what it reports, what it ignores, and when it leaves the network. It
+is used by the [LG Soundbars](https://www.home-assistant.io/integrations/lg_soundbar)
 integration of Home Assistant.
 
 The messages it sends and the way it reads the answers are those of
 python-temescal, which has been used with many LG models through that
-integration, so models that worked with it should keep working. Beyond that,
-this project aims at handling each model as it really behaves: what it
-reports, what it ignores, and when it leaves the network.
+integration, so models that worked with it should keep working.
 
 Features:
 
