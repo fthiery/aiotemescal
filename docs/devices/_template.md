@@ -39,3 +39,9 @@ standby without network, internet access needed…
 - Whether `set_power()` works (`--try-power`).
 - Which fields change between on and standby (the "On and standby" table of the
   report), and the power draw in each state if you can measure it.
+
+## Raw state
+
+The `Full state` block of the report, in the same form as on the
+[SP8YA page](lg-sp8ya.md#raw-state), saying whether the device was on or in
+standby. Check that names and addresses are redacted.

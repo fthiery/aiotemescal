@@ -82,3 +82,114 @@ unprompted, followed by `SPK_LIST_VIEW_INFO` and `PLAY_INFO`:
 Comparing the full state in both cases, only these two fields change.
 `b_connect` is therefore the only hint of the power state, but it has only
 been observed with the TV as the source, not with Bluetooth or Wi-Fi playback.
+
+## Raw state
+
+What the device answers to each message, as collected by `aiotemescal report`
+on 2026-11-08, in network standby (firmware above). Names and addresses are
+redacted. `null` means the device did not answer.
+
+```json
+{
+  "C4A_SETTING_INFO": {
+    "i_agree": 0,
+    "s_timezone": "d"
+  },
+  "EQ_VIEW_INFO": {
+    "ai_eq_list": [19, 0, 7, 20, 21, 6, 22, 14, 5, 15, 23],
+    "i_bass": 5,
+    "i_curr_eq": 0,
+    "i_treble": 5,
+    "merdian_eq_list": [6]
+  },
+  "FUNC_VIEW_INFO": {
+    "ai_func_list": [0, 1, 15, 6, 19],
+    "b_connect": false,
+    "i_curr_func": 4,
+    "s_spk_bt_name": "<redacted>"
+  },
+  "MAC_INFO_DEV": null,
+  "PLAY_INFO": {
+    "b_support_play_ctrl": true,
+    "i_duration": 0,
+    "i_play_ctrl": 0,
+    "i_position": 0,
+    "i_stream_type": 0
+  },
+  "PRODUCT_INFO": {
+    "i_model_no": 0,
+    "i_model_type": 0,
+    "i_network_type": 1,
+    "s_model_name": "SP8YA"
+  },
+  "SETTING_VIEW_INFO": {
+    "b_auto_power": true,
+    "b_auto_vol": false,
+    "b_avsmrm_status": false,
+    "b_drc": false,
+    "b_enable_dialog": false,
+    "b_neuralx": false,
+    "b_night_time": false,
+    "b_nighttime_enable": true,
+    "b_rear": false,
+    "b_set_device_name": false,
+    "b_soundbarmode": false,
+    "b_support_avsmrm": true,
+    "b_support_diag": true,
+    "b_tv_remote": true,
+    "b_wow_connect": false,
+    "i_av_sync": 0,
+    "i_calibration_status": 0,
+    "i_center_level": 6,
+    "i_center_max": 6,
+    "i_center_min": -6,
+    "i_curr_eq": 0,
+    "i_dialog_level": 0,
+    "i_dialog_max": 6,
+    "i_dialog_min": 0,
+    "i_rear_level": 3,
+    "i_rear_max": 6,
+    "i_rear_min": -6,
+    "i_top_level": 6,
+    "i_top_max": 6,
+    "i_top_min": -6,
+    "i_woofer_level": 15,
+    "i_woofer_max": 6,
+    "i_woofer_min": -15,
+    "s_ipv4_addr": "<redacted>",
+    "s_ipv6_addr": "<redacted>",
+    "s_user_name": "<redacted>"
+  },
+  "SPK_LIST_VIEW_INFO": {
+    "b_avsmrm_status": false,
+    "b_func_pictogram": true,
+    "b_mute": false,
+    "b_soundbarmode": false,
+    "b_spotify_connect": false,
+    "b_support_avsmrm": true,
+    "b_update": false,
+    "b_wow_connect": false,
+    "i_calibration_status": 0,
+    "i_curr_func": 4,
+    "i_vol": 15,
+    "i_vol_max": 40,
+    "i_vol_min": 0,
+    "s_user_name": "<redacted>"
+  },
+  "UPDATE_VIEW_INFO": {
+    "b_update": false,
+    "i_progress": 0,
+    "o_server_ver": {},
+    "o_system_ver": {
+      "s_c4a": "1.56.310669",
+      "s_main": "2407090",
+      "s_micom": "2207202"
+    },
+    "s_region": "df"
+  }
+}
+```
+
+Note the corrupted `s_timezone` in `C4A_SETTING_INFO` (see
+[Internet access](#internet-access)). When on, the only differences are those
+listed under [Power](#power).
