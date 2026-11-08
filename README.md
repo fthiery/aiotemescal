@@ -9,6 +9,12 @@ network, for example a soundbar powered through a smart plug. It is used by the
 [LG Soundbars](https://www.home-assistant.io/integrations/lg_soundbar)
 integration of Home Assistant.
 
+The messages it sends and the way it reads the answers are those of
+python-temescal, which has been used with many LG models through that
+integration, so models that worked with it should keep working. Beyond that,
+this project aims at handling each model as it really behaves: what it
+reports, what it ignores, and when it leaves the network.
+
 Features:
 
 - the connection is kept open in the background and re-established with an
@@ -134,16 +140,20 @@ make test-power-cycle TEMESCAL_HOST=192.168.1.127  # asks you to unplug and repl
 | --- | --- | --- |
 | LG SP8YA | 2407090 / 2207202 / 1.56.310669 | [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md) |
 
-The versions are those reported in `UPDATE_VIEW_INFO`. Each device page
-gathers what was learned on that model: how it identifies itself, when it
-disconnects by itself, and what it supports, such as power control.
+Models that worked with python-temescal are expected to work too; this table
+only lists the ones tested with aiotemescal itself. The versions are those
+reported in `UPDATE_VIEW_INFO`. Each device page gathers what was learned on
+that model: how it identifies itself, when it disconnects by itself, and what
+it supports, such as power control.
 
 ## Contributing
 
-Only one model has been tested so far, and models differ: some report their
-power state and others do not, some offer inputs or sound modes that have no
-name in this library yet. A report from your device is the most useful
-contribution, even if everything works.
+The protocol works the same across models, but the details differ: some report
+their power state and others do not, some offer inputs or sound modes that
+have no name in this library yet, some need internet access to stay
+reachable. Handling these differences faithfully is a goal of this project,
+and only one model has been examined in detail so far. A report from your
+device is the most useful contribution, even if everything works.
 
 ### Report your device
 
@@ -250,8 +260,8 @@ The report lists these indices under "without a name in aiotemescal".
 
 ### Support for more models
 
-Only the SP8YA has been tested, and the client assumes every model behaves the
-same. Supporting more models means:
+The client treats every model the same way, as python-temescal did. Handling
+each model as it really behaves means:
 
 - turning the reports people send (see [Contributing](#contributing)) into
   test fixtures, by loading the state of a report into the fake soundbar of
