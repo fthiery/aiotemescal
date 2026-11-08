@@ -24,6 +24,27 @@ Features:
 - connection state changes are reported to subscribers;
 - requests can be awaited for their answer.
 
+## Contents
+
+- [Usage](#usage)
+- [Reconnection](#reconnection)
+- [Power loss detection](#power-loss-detection)
+- [Debugging](#debugging)
+- [Tests](#tests)
+- [Tested devices](#tested-devices)
+- [Contributing](#contributing)
+  - [Report your device](#report-your-device)
+  - [Add a device page](#add-a-device-page)
+  - [Test against your device](#test-against-your-device)
+- [Future work](#future-work)
+  - [Devices without power control](#devices-without-power-control)
+  - [Unknown inputs and sound modes](#unknown-inputs-and-sound-modes)
+  - [Support for more models](#support-for-more-models)
+  - [Power loss detection outside Linux](#power-loss-detection-outside-linux)
+  - [Identity from mDNS](#identity-from-mdns)
+- [Credits](#credits)
+- [License](#license)
+
 ## Usage
 
 ```python
@@ -258,16 +279,6 @@ mDNS, as `LG_SMART_AUDIO-<uuid>._lg-smart-device._tcp.local.` with the UUID and
 the IPv4 address in the TXT record. A helper that reads the UUID and the
 address from such an announcement would spare each application from parsing
 it.
-
-### Stream desynchronisation
-
-The client looks for the marker byte of the next frame and skips anything
-else. On 2026-11-07 a long run of `skipping byte` debug messages was logged
-with the SP8YA: the client had lost the start of a frame and skipped its
-content byte by byte until it found a marker, which may also have been a byte
-inside the frame rather than the start of the next one. The cause is not
-known. It should be investigated, and reconnecting may be safer than searching
-the stream for the next frame.
 
 ## Credits
 
