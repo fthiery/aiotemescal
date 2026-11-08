@@ -1,6 +1,7 @@
 """Tests for the temescal client against a fake soundbar."""
 
 import asyncio
+import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 import socket
 from typing import Any
@@ -430,3 +431,19 @@ async def test_idle_socket_has_nothing_unacknowledged(
     assert client._writer is not None
 
     assert _unacknowledged(client._writer.get_extra_info("socket")) == 0
+
+
+async def test_skipped_bytes_are_logged_once(
+    soundbar: FakeSoundbar, client: TemescalClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Bytes that start neither a frame nor a message are logged in one line."""
+    caplog.set_level(logging.DEBUG, logger="aiotemescal")
+    received: list[dict[str, Any]] = []
+    client.subscribe(received.append)
+
+    await soundbar.push_raw(b"garbage")
+    await soundbar.push({"msg": "PLAY_INFO", "data": {}})
+    await wait_for(lambda: len(received) == 1)
+
+    skipped = [r.getMessage() for r in caplog.records if "skipped" in r.getMessage()]
+    assert skipped == ["127.0.0.1: skipped 7 bytes: b'garbage'"]
