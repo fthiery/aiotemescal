@@ -263,13 +263,15 @@ same. Supporting more models means:
 
 ### Power loss detection outside Linux
 
-On macOS and Windows the client keeps the keepalive settings of the operating
-system, so a device that loses power can go unnoticed for up to two hours (see
-[Power loss detection](#power-loss-detection)). Both systems have equivalents
-of the Linux options: `TCP_KEEPALIVE`, `TCP_KEEPINTVL` and `TCP_KEEPCNT` on
-macOS, the `SIO_KEEPALIVE_VALS` ioctl on Windows. Neither has
-`TCP_USER_TIMEOUT`, so commands sent to a device that just lost power may take
-longer to fail.
+The client should run on macOS and Windows, which is enough for development,
+but it has only been tested on Linux. The keepalive options are only set when
+Python exposes them under their Linux names, and commands do not wait for the
+device to acknowledge them, so how quickly a power loss is noticed there is
+unknown: it may take up to the two hours of the system default (see
+[Power loss detection](#power-loss-detection)). Making this match Linux would
+mean setting the equivalents those systems have, such as `TCP_KEEPALIVE` on
+macOS, and testing on them. Since Home Assistant runs on Linux, this is not a
+priority.
 
 ### Identity from mDNS
 
