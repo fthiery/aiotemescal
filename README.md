@@ -235,14 +235,26 @@ device.
 
 ### Devices without power control
 
-Some soundbars, like the [SP8YA](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md#power), do not
-implement power control: they never report `b_powerstatus` and ignore
-`set_power()` without answering. The client currently sends the command
-anyway, and an application cannot tell whether it did anything. This needs
-to be handled:
+`set_power()` does not come from python-temescal. It sends the `b_powerkey` key
+proposed in [a pull request to python-temescal](https://github.com/mjg59/python-temescal/pull/1)
+in 2022, which was never merged, and which the Home Assistant integration
+copied in 2024 ([home-assistant/core#127022](https://github.com/home-assistant/core/pull/127022)).
+It worked on the device of whoever added it, but no model was named, and it
+does not work everywhere:
 
-- tell whether a device supports power control, from whether it reports
-  `b_powerstatus`, so that applications can hide their power button;
+| Model | `set_power()` | Power state | Source |
+| --- | --- | --- | --- |
+| SP8YA | ignored, on and off | never reported | [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md#power) |
+| SK8 | does nothing | always shown as on, even after the remote | [comment](https://github.com/mjg59/python-temescal/pull/1) of 2024-12-26 |
+| DSP11RA | turns it on, not off | always shown as on | [comment](https://github.com/mjg59/python-temescal/pull/1) of 2025-04-16 |
+
+The client currently sends the command anyway, and an application cannot tell
+whether it did anything. This needs to be handled:
+
+- tell whether a device supports power control, so that applications can hide
+  their power button. Whether it reports `b_powerstatus` is a likely sign,
+  since none of the models above does, but the DSP11RA shows that support can
+  also be partial;
 - where it is reliable, follow the power state from other fields, such as
   `b_connect` on the SP8YA (only confirmed with the TV as the source so far).
 
