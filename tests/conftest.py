@@ -49,8 +49,12 @@ class FakeSoundbar:
 
     async def push(self, message: dict[str, Any]) -> None:
         """Send an unsolicited message to every client."""
+        await self.push_raw(encode_frame(message))
+
+    async def push_raw(self, data: bytes) -> None:
+        """Send bytes as they are to every client."""
         for writer in self._writers:
-            writer.write(encode_frame(message))
+            writer.write(data)
             await writer.drain()
 
     async def _handle(

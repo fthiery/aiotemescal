@@ -328,11 +328,17 @@ class TemescalClient:
     async def _read_frames(self) -> None:
         if (reader := self._reader) is None:
             return
+        skipped = bytearray()
         while True:
             marker = (await reader.readexactly(1))[0]
             if marker != FRAME_MARKER:
-                _LOGGER.debug("%s: skipping byte %#x", self.host, marker)
+                skipped.append(marker)
                 continue
+            if skipped:
+                _LOGGER.debug(
+                    "%s: skipped %d bytes: %r", self.host, len(skipped), bytes(skipped)
+                )
+                skipped.clear()
             length = decode_length(await reader.readexactly(LENGTH_SIZE))
             if length > MAX_BODY_SIZE:
                 raise TemescalProtocolError(f"Frame too large: {length}")
