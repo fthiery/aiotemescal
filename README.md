@@ -150,11 +150,14 @@ it supports, such as power control.
 ## Contributing
 
 The protocol works the same across models, but the details differ: some report
-their power state and others do not, some offer inputs or sound modes that
-have no name in this library yet, some need internet access to stay
-reachable. Handling these differences faithfully is a goal of this project,
-and only one model has been examined in detail so far. A report from your
-device is the most useful contribution, even if everything works.
+their power state and others do not, some report their unique identifier
+(`s_uuid`) in `MAC_INFO_DEV`, others only in `PRODUCT_INFO` (the S90QY,
+according to [home-assistant/core#77856](https://github.com/home-assistant/core/pull/77856))
+or not at all (the SP8YA), some offer inputs or sound modes that have no name
+in this library yet, some need internet access to stay reachable. Handling
+these differences faithfully is a goal of this project, and only one model
+has been examined in detail so far. A report from your device is the most
+useful contribution, even if everything works.
 
 ### Report your device
 

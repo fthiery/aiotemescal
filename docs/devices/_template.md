@@ -18,8 +18,9 @@ What was learned on one <model>. It may or may not apply to other models.
 
 ## Identification and startup
 
-- What `PRODUCT_INFO` reports, whether `s_uuid` is reported and whether
-  `MAC_INFO_DEV` is answered (see the findings of the report).
+- What `PRODUCT_INFO` reports, whether `s_uuid` is reported and in which
+  message (`MAC_INFO_DEV` or `PRODUCT_INFO`), and whether `MAC_INFO_DEV` is
+  answered (see the findings of the report).
 - How it shows up on the network (mDNS service name, host name), if known.
 - How long port 9741 takes to open after the device is powered.
 

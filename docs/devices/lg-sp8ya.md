@@ -16,7 +16,9 @@ What was learned on one SP8YA. It may or may not apply to other models.
 - It advertises itself over mDNS as
   `LG_SMART_AUDIO-<uuid>._lg-smart-device._tcp.local.`, with the UUID and the
   IPv4 address in the TXT record, under the generic host name
-  `audiocast.local`.
+  `audiocast.local`. That UUID is not reported over the protocol, so the
+  device offers no identifier that matches it, nor any other that stays the
+  same when its IP address changes.
 - When it boots, port 9741 opens 10 to 32 s after the device first answers
   ping, and connections are refused until then.
 - It answers TCP keepalive probes and keeps an idle connection open without
