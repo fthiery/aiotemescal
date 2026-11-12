@@ -81,6 +81,11 @@ unprompted, followed by `SPK_LIST_VIEW_INFO` and `PLAY_INFO`:
 | On | 11-12 W | `True` | 20 (E-ARC) |
 | Network standby | about 4 W | `False` | 4 (Optical) |
 
+The client therefore reports `reports_power` as `False` for it, and never
+checks it when it is silent (see the README, "Silent devices"). Asking it for
+its state while in standby does not wake it up: it was asked several times on
+2026-11-08 and stayed in standby.
+
 Comparing the full state in both cases, only these two fields change.
 `b_connect` is therefore the only hint of the power state, but it has only
 been observed with the TV as the source, not with Bluetooth or Wi-Fi playback.

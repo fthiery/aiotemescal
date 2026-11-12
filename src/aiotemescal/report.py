@@ -226,7 +226,7 @@ def render(report: Report, *, redacted: bool = True) -> str:
             lines.append("No field changed between on and standby.")
 
     if report.power_answers:
-        lines += ["", "### Power commands", ""]
+        lines += ["", "### Power", ""]
         lines += [
             f"- {question} **{answer}**"
             for question, answer in report.power_answers.items()
@@ -331,6 +331,12 @@ async def gather(
         )
         note("user: device in standby")
         report.standby = await _collect_or_none(client)
+        if report.standby is not None:
+            # Some models are said to wake up when asked for their state in standby
+            note("asked for the state in standby")
+            await asyncio.sleep(power_wait)
+            question = "Is it still in standby after being asked for its state?"
+            report.power_answers[question] = await _yes_no(ask, question)
         return report
     finally:
         for callback in unsubscribe:

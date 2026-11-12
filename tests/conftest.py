@@ -64,7 +64,7 @@ class FakeSoundbar:
                 message = decode_body(await reader.readexactly(length))
                 await self.received.put(message)
                 if self.responsive and message["msg"] not in self.ignored:
-                    answer = {"msg": message["msg"]}
+                    answer = {"cmd": "notibyget", "msg": message["msg"]}
                     if (data := self.answers.get(message["msg"])) is not None:
                         answer["data"] = data
                     writer.write(encode_frame(answer))
