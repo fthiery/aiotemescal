@@ -79,50 +79,54 @@ It does not support remote power control:
   this is not a working power command. The LG app has no power button for it
   either.
 
-It turns on and off by following the TV over HDMI eARC, with `b_auto_power`
-enabled in `SETTING_VIEW_INFO`. On each change it sends `FUNC_VIEW_INFO`
-unprompted, followed by `SPK_LIST_VIEW_INFO` and `PLAY_INFO`:
-
-| State | Power draw | `b_connect` | `i_curr_func` |
-| --- | --- | --- | --- |
-| On | 11-12 W | `True` | 20 (E-ARC) |
-| Network standby | about 4 W | `False` | 4 (Optical) |
-
 The client therefore reports `reports_power` as `False` for it, and never
 checks it when it is silent (see the README, "Silent devices").
 
+### What it reports by itself
+
+It turns on and off by following the TV over HDMI eARC, with `b_auto_power`
+enabled in `SETTING_VIEW_INFO`. Its power draw is 11-12 W on and about 4 W in
+network standby. The report of 2026-11-22 recorded what it sends by itself:
+
+- **Turning on with the TV** is reported. It sends `FUNC_VIEW_INFO` with
+  `i_curr_func: 4` (Optical), then `20` (E-ARC) with `b_connect: true`, each
+  followed by `SPK_LIST_VIEW_INFO` and `PLAY_INFO`. Being woken by a request
+  just after the TV was turned off sent the same sequence. Turning the TV on while the
+  soundbar is already on sends only the `20` (E-ARC) part.
+- **Going to standby with the TV** sends nothing, twice in that report: no
+  message has `b_connect: false`. On 2026-11-08 a `FUNC_VIEW_INFO` with
+  `b_connect: false` and `i_curr_func: 4` had been seen on each change, but its
+  internet access was blocked that day (see [Internet access](#internet-access)).
+- **Turning on or off with the remote** sends nothing, and when asked, its
+  state is the same on and in standby (`b_connect: false`, `i_curr_func: 4`).
+  Right after being turned on with the remote, it did not answer
+  `SPK_LIST_VIEW_INFO` within 2 s, in two reports out of two (the first also
+  missed `FUNC_VIEW_INFO`), presumably while it starts.
+
+So turning on with the TV can be detected, but going to standby cannot be
+detected over the protocol, and neither can any change made with the remote.
+The power draw of a smart plug is the only reliable sign observed so far.
+
+### Waking on requests
+
 Any request turns it on when it is in network standby, whichever way it went
-there. On 2026-11-21, a connection was opened without sending anything, which
-did not wake it, then a single `SPK_LIST_VIEW_INFO` was sent:
-
-- after being put in standby with its remote, the request turned it on, on its
-  optical input. Each of `PRODUCT_INFO`, `UPDATE_VIEW_INFO`, `EQ_VIEW_INFO`,
-  `SETTING_VIEW_INFO`, `PLAY_INFO`, `FUNC_VIEW_INFO` and `SPK_LIST_VIEW_INFO`
-  was also tried alone, with the same result;
-- after going to standby by itself when the TV was turned off, the request
-  turned it on too.
-
-On 2026-11-08 it had stayed in standby when asked after the TV was turned off,
-but its internet access was blocked that day (see
-[Internet access](#internet-access)), which may explain the difference.
+there, so its state cannot be read in standby either. On 2026-11-21, a
+connection was opened without sending anything, which did not wake it, then a
+single `SPK_LIST_VIEW_INFO` was sent: it turned the soundbar on, on its optical
+input, after a standby with the remote and after a standby following the TV.
+Each of `PRODUCT_INFO`, `UPDATE_VIEW_INFO`, `EQ_VIEW_INFO`, `SETTING_VIEW_INFO`,
+`PLAY_INFO`, `FUNC_VIEW_INFO` and `SPK_LIST_VIEW_INFO` was also tried alone,
+with the same result. The reports of 2026-11-22 found the same, with the remote
+and with the TV. On 2026-11-08, with its internet access blocked, it had stayed
+in standby when asked.
 
 When its power comes back (smart plug turned on), it starts on, before any
 request, so the client does not wake it in that case.
 
 Since the client asks for the whole state on every connection, a reconnection
 while it is in standby turns it on: after its [daily restart](#daily-restart),
-at night, or after a Wi-Fi loss. Skipping the requests while it is known to be
-off is not possible, since it does not report its power state, and no message
-is safe to send. Whether it then goes back to standby by itself without the TV
-has not been checked.
-
-Turning it off or on with the remote is not reported at all: no message is
-sent, and its state is the same when asked. Only the changes that follow the
-TV (see the table above) are reported.
-
-Comparing the full state in both cases, only these two fields change.
-`b_connect` is therefore the only hint of the power state, but it has only
-been observed with the TV as the source, not with Bluetooth or Wi-Fi playback.
+at night, or after a Wi-Fi loss. Whether it then goes back to standby by itself
+without the TV has not been checked.
 
 ## Raw state
 

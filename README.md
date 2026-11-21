@@ -120,8 +120,8 @@ ignore `set_power()` too, so an application can hide its power control when
 ## Command line
 
 ```
-uvx aiotemescal 192.168.1.15 -v     # print every message and connection change
-uvx aiotemescal report 192.168.1.15 # describe the device (see Contributing)
+uvx aiotemescal 192.168.1.15 -v                  # print every message and connection change
+uvx aiotemescal report 192.168.1.15 -o report.md # describe the device (see Contributing)
 ```
 
 ## Tests
@@ -153,30 +153,31 @@ works.
 ### Report your device
 
 With [uv](https://docs.astral.sh/uv/), from a machine on the same network as
-the device, at the device with its remote at hand, and with the LG app closed
-(it queries the device and interferes with the report):
+the device, while at the device. Close the LG app and temporarily disable the
+LG Soundbars integration of Home Assistant, or any other client of the device:
+they query it, which can turn it on and hides what it sends by itself.
 
 ```
-uvx aiotemescal report 192.168.1.15
+uvx aiotemescal report 192.168.1.15 -o report.md
 ```
 
 The report always does every step, so that reports can be compared:
 
 - it reads the state: what the device reports, the inputs and sound modes it
   offers, and the messages it does not answer;
-- it asks you to put the device in standby and on with its remote, then in
-  standby the way you usually do, records how each change is reported,
-  compares the state on and in standby, and asks whether reading the state
-  woke the device;
-- it sends the power commands and asks whether they worked;
+- it asks you to put the device in standby, then to turn it on, first with its
+  remote, then with the TV if the device follows it. For each change, it
+  records what the device sends by itself, compares the state on and in
+  standby, asks whether reading the state in standby turned it on, and
+  concludes whether the power state can be followed;
 - it selects each sound mode that has no name yet, asks which name the display
   shows, then restores the current mode.
 
-A step you cannot do, for example without a remote, can be skipped when asked.
-Addresses, UUIDs and names are replaced with `<redacted>` (`--no-redact` keeps
-them); `-o FILE` writes the Markdown report to a file. Behaviours that only show up over time
-are not caught by the report: watch the device with `uvx aiotemescal HOST -v`
-for a while and paste the relevant part.
+`-o` writes the Markdown report to a file, which keeps it apart from the
+questions asked on the terminal. Addresses, UUIDs and names are replaced with
+`<redacted>` (`--no-redact` keeps them). Behaviours that only show up over
+time are not caught by the report: watch the device with
+`uvx aiotemescal HOST -v` for a while and paste the relevant part.
 
 Then [open an issue](https://github.com/fthiery/aiotemescal/issues/new?template=device_report.md)
 with the report and anything it cannot see, such as how the device is

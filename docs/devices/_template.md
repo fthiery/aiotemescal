@@ -38,9 +38,11 @@ standby without network, internet access needed…
 ## Power
 
 - Whether `b_powerstatus` is reported.
-- Whether `set_power()` works (the report tries it).
-- Which fields change between on and standby (the "On and standby" table of the
-  report), and the power draw in each state if you can measure it.
+- Whether `set_power()` works. On a device that any request wakes up,
+  `set_power(True)` turning it on proves nothing.
+- Which fields change between on and standby, and whether the device sends
+  them by itself (the "Power detection" section of the report), and the power
+  draw in each state if you can measure it.
 
 ## Raw state
 
