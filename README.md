@@ -47,6 +47,7 @@ Features:
   - [Test against your device](#test-against-your-device)
 - [Future work](#future-work)
   - [Devices without power control](#devices-without-power-control)
+  - [Waking devices in standby](#waking-devices-in-standby)
   - [Devices that go silent after a manual shutdown](#devices-that-go-silent-after-a-manual-shutdown)
   - [Unknown inputs and sound modes](#unknown-inputs-and-sound-modes)
   - [Support for more models](#support-for-more-models)
@@ -140,10 +141,12 @@ Devices in standby and devices that do not report their power state are never
 asked, so this does not apply to the SP8YA. The LG S95Q was reported to behave
 this way (see its [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md)).
 
-Asking a device in standby for its state is safe on the models tested so far:
-neither the SP8YA nor the S95Q wakes up, which the guided report checks. The
-client therefore asks for the whole state on every connection, including while
-the device is in standby.
+Asking a device in standby for its state is not always safe. The S95Q stays
+in standby, but the SP8YA wakes up when it receives a request after being put
+in standby with its remote (opening the connection alone does not wake it).
+The client asks for the whole state on every connection, so it can wake such a
+device, for example after its daily restart (see [Waking devices in
+standby](#waking-devices-in-standby)). The guided report checks it.
 
 ## Debugging
 
@@ -193,7 +196,8 @@ useful contribution, even if everything works.
 ### Report your device
 
 With [uv](https://docs.astral.sh/uv/), from any machine on the same network as
-the device:
+the device, with the LG app closed (it queries the device, which interferes
+with what the report observes):
 
 ```
 uvx aiotemescal report 192.168.1.15                         # read-only
@@ -206,17 +210,22 @@ uvx aiotemescal report 192.168.1.15 --guided --name-modes   # also asks the name
   changed. It lists what the device reports, the inputs and sound modes it
   offers, and the messages it does not answer.
 - `--guided` asks you to put the device in standby, then to turn it on, with
-  its remote, its own button or the LG app (not every model has a power button
-  in the app), then to put it in standby the way you usually do (TV off, for
-  example). Steps can be skipped, for example without a remote at hand. For each power change, the report says whether the device sent
+  its remote or its own button, then to put it in standby the way you usually
+  do (TV off, for example). Steps can be skipped, for example without a remote
+  at hand. Do not use the LG app for these steps: it queries the device, which
+  can wake it up and hides what the device reports by itself. For each power change, the report says whether the device sent
   `b_powerstatus` by itself, only reported it when asked, or not at all, which
   tells whether, and how, its power state can be followed. It also compares
-  its full state on and in standby, records every message the device sends by
-  itself, and asks whether asking for the state in standby woke it up.
+  its full state on and in standby, and records every message the device sends
+  by itself. After each standby, it asks whether reading the state woke the
+  device up; if it did, it asks you to put it in standby again, without
+  reading the state, before turning it on.
 - `--try-power` also sends the power commands, which turn the device off and
-  on, and asks you whether they worked.
+  on, and asks you whether they worked, before reading the state. If one did
+  nothing, it asks you to use the remote instead, so that the next one can
+  still be checked.
 - `--name-modes` selects each sound mode that has no name in aiotemescal, asks
-  you which name the soundbar or the LG app shows for it, then restores the
+  you which name the display of the soundbar shows for it, then restores the
   current sound mode. It can be used with or without `--guided`.
 
 `--try-power` and `--name-modes` are the only options that change the device.
@@ -237,8 +246,7 @@ replaced with `<redacted>`; `--no-redact` keeps them. Read it before posting.
 
 Then [open an issue](https://github.com/fthiery/aiotemescal//issues/new?template=device_report.md)
 with the report, and anything you noticed that the report cannot see: how the
-device is connected to the TV, whether it loses the connection by itself, what
-the LG app shows for an unknown sound mode.
+device is connected to the TV, whether it loses the connection by itself.
 
 Example, a read-only report of the tested SP8YA while in standby:
 
@@ -315,6 +323,21 @@ whether it did anything. This needs to be handled:
 Reports from other models (see [Contributing](#contributing)) are needed to
 know which models are affected and which fields can be trusted.
 
+### Waking devices in standby
+
+The SP8YA wakes up, on its optical input, when it receives any request while
+in standby after being put there with its remote (each of the seven state
+messages was tried); it did not on 2026-11-08 after going to standby by itself
+when the TV was turned off. The client asks for the
+whole state on every connection, including reconnections, for example after
+the daily restart of the device or when its power comes back, which can turn
+it on at night. Skipping the requests while the device is known to be off does
+not help here, since the SP8YA does not report its power state, and avoiding
+some messages does not either, since any of them wakes it. Avoiding this would
+mean not asking for the state on reconnection for such models, and relying on
+what they report by themselves, at the cost of a state that may be stale after
+a reconnection.
+
 ### Devices that go silent after a manual shutdown
 
 On the S95Q, the connection sometimes stops delivering updates after the
@@ -328,10 +351,10 @@ unavailable when the reconnection succeeds right away.
 ### Unknown inputs and sound modes
 
 The input and sound mode tables come from python-temescal and stop at the
-models it knew. The [SP8YA](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md#inputs-and-sound-modes)
-offers sound mode 23 and the [S95Q](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md#inputs-and-sound-modes)
-sound modes 23 to 26, which have no name yet; applications show them as
-unknown. Their names have to be found and added to `equalisers` in
+models it knew. Sound mode 23 was named "Sound Share" from the display of the
+[SP8YA](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md#inputs-and-sound-modes); the
+[S95Q](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md#inputs-and-sound-modes) also offers modes 24
+to 26, which have no name yet; applications show them as unknown. Their names have to be found and added to `equalisers` in
 `const.py`, along with any index reported by other models. The report lists
 these indices under "without a name in aiotemescal", and `--name-modes` asks
 for their names.

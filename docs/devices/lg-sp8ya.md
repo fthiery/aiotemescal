@@ -31,7 +31,9 @@ What was learned on one SP8YA. It may or may not apply to other models.
   ARC), 6 (HDMI), 19 (USB2). The current input is often one that is not in
   that list: 20 (E-ARC) when on, 4 (Optical) in standby.
 - Sound modes offered (`ai_eq_list`): 19, 0, 7, 20, 21, 6, 22, 14, 5, 15 and
-  23. Mode 23 has no name in aiotemescal yet.
+  23. Mode 23 shows as "Sound Share" on the display of the soundbar (the LG
+  app shows "Synchronisé avec la télévision" in French), and is named so in
+  aiotemescal.
 
 ## Daily restart
 
@@ -68,9 +70,11 @@ It does not support remote power control:
 
 - it never sends `b_powerstatus`, in any message, so its power state cannot be
   read directly;
-- it ignores `set_power()` (the `b_powerkey` key) whether it is on or in
-  standby, with either value, and sends no answer. The LG app has no power
-  button for it either.
+- `set_power(False)` (the `b_powerkey` key) does nothing, and no power command
+  gets an answer. `set_power(True)` sent after a standby by remote does turn
+  it on (its display shows OPT), but so does any other request (see below), so
+  this is not a working power command. The LG app has no power button for it
+  either.
 
 It turns on and off by following the TV over HDMI eARC, with `b_auto_power`
 enabled in `SETTING_VIEW_INFO`. On each change it sends `FUNC_VIEW_INFO`
@@ -82,9 +86,21 @@ unprompted, followed by `SPK_LIST_VIEW_INFO` and `PLAY_INFO`:
 | Network standby | about 4 W | `False` | 4 (Optical) |
 
 The client therefore reports `reports_power` as `False` for it, and never
-checks it when it is silent (see the README, "Silent devices"). Asking it for
-its state while in standby does not wake it up: it was asked several times on
-2026-11-08 and stayed in standby.
+checks it when it is silent (see the README, "Silent devices").
+
+Whether asking for its state wakes it depends on how it went to standby:
+
+- after going to standby by itself when the TV was turned off, it was asked
+  several times on 2026-11-08 and stayed in standby;
+- after being put in standby with its remote, on 2026-11-21, any request
+  turned it on, on its optical input: each of `PRODUCT_INFO`,
+  `UPDATE_VIEW_INFO`, `EQ_VIEW_INFO`, `SETTING_VIEW_INFO`, `PLAY_INFO`,
+  `FUNC_VIEW_INFO` and `SPK_LIST_VIEW_INFO` was tried alone. Opening the
+  connection without sending anything did not.
+
+Turning it off or on with the remote is not reported at all: no message is
+sent, and its state is the same when asked. Only the changes that follow the
+TV (see the table above) are reported.
 
 Comparing the full state in both cases, only these two fields change.
 `b_connect` is therefore the only hint of the power state, but it has only

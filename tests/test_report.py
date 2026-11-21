@@ -10,6 +10,7 @@ from aiotemescal.__main__ import main
 from aiotemescal.report import (
     REDACTED,
     TRANSITION_ASKED,
+    TRANSITION_NOT_PUSHED,
     TRANSITION_NOT_REPORTED,
     TRANSITION_PUSHED,
     TRANSITION_SKIPPED,
@@ -35,7 +36,7 @@ ON: Snapshot = {
         "s_spk_bt_name": "Salle TV",
     },
     "SPK_LIST_VIEW_INFO": {"i_vol": 15, "i_curr_func": 20, "s_user_name": "Salle TV"},
-    "EQ_VIEW_INFO": {"ai_eq_list": [19, 0, 23], "i_curr_eq": 0},
+    "EQ_VIEW_INFO": {"ai_eq_list": [19, 0, 24], "i_curr_eq": 0},
     "PRODUCT_INFO": {"s_model_name": "SP8YA"},
     "UPDATE_VIEW_INFO": {
         "o_system_ver": {
@@ -86,7 +87,7 @@ def test_analyse() -> None:
     )
     assert any(f.startswith("Power state: not reported") for f in findings)
     assert "Unique id: not reported (no `s_uuid`)" in findings
-    assert "Sound modes without a name in aiotemescal: 23" in findings
+    assert "Sound modes without a name in aiotemescal: 24" in findings
     assert "Current input: 20 (E-ARC)" in findings
     assert "No answer to: `MAC_INFO_DEV`" in findings
 
@@ -176,7 +177,7 @@ def test_render_standby_lost() -> None:
 async def test_gather_guided(soundbar: FakeSoundbar) -> None:
     """Each power change says whether the device reported it, and how."""
     soundbar.answers["SPK_LIST_VIEW_INFO"] = {"b_powerstatus": True}
-    answers = iter(["", "", "y", "n", "", "", "y"])
+    answers = iter(["", "y", "", "y", "n", "", "", "y"])
 
     async def ask(prompt: str) -> str:
         if "standby with its remote" in prompt:
@@ -207,13 +208,13 @@ async def test_gather_guided(soundbar: FakeSoundbar) -> None:
         )
 
     assert report.transitions == [
-        ("Standby with the remote or the LG app", TRANSITION_PUSHED),
-        ("On with the remote or the LG app", TRANSITION_ASKED),
-        ("`set_power(False)`", TRANSITION_NOT_REPORTED),
-        ("`set_power(True)`", TRANSITION_ASKED),
+        ("Standby with the remote", TRANSITION_PUSHED),
+        ("On with the remote", TRANSITION_ASKED),
+        ("`set_power(False)`", TRANSITION_NOT_PUSHED),
+        ("`set_power(True)`", TRANSITION_NOT_PUSHED),
         ("Standby the usual way", TRANSITION_NOT_REPORTED),
     ]
-    assert list(report.power_answers.values()) == ["yes", "no", "yes"]
+    assert list(report.power_answers.values()) == ["yes", "yes", "no", "yes"]
     assert report.on is not None
     assert report.standby is not None
     assert diff(report.on, report.standby) == [
@@ -222,7 +223,7 @@ async def test_gather_guided(soundbar: FakeSoundbar) -> None:
     power = [m async for m in _drain(soundbar) if m.get("cmd") == "set"]
     assert [m["data"] for m in power] == [{"b_powerkey": False}, {"b_powerkey": True}]
     text = render(report)
-    assert f"- Standby with the remote or the LG app: {TRANSITION_PUSHED}" in text
+    assert f"- Standby with the remote: {TRANSITION_PUSHED}" in text
     assert "# standby with the remote" in text
 
 
@@ -239,8 +240,8 @@ async def test_gather_guided_steps_can_be_skipped(soundbar: FakeSoundbar) -> Non
         report = await gather(client, guided=True, ask=ask, power_wait=0)
 
     assert report.transitions == [
-        ("Standby with the remote or the LG app", TRANSITION_SKIPPED),
-        ("On with the remote or the LG app", TRANSITION_SKIPPED),
+        ("Standby with the remote", TRANSITION_SKIPPED),
+        ("On with the remote", TRANSITION_SKIPPED),
         ("Standby the usual way", TRANSITION_NOT_REPORTED),
     ]
     assert report.standby_remote is None
@@ -303,7 +304,7 @@ def test_try_power_needs_guided(capsys: pytest.CaptureFixture[str]) -> None:
 
 async def test_unknown_sound_modes_are_named(soundbar: FakeSoundbar) -> None:
     """Each sound mode without a name is selected and named, then the mode is restored."""
-    soundbar.answers["EQ_VIEW_INFO"] = {"ai_eq_list": [0, 23, 26], "i_curr_eq": 0}
+    soundbar.answers["EQ_VIEW_INFO"] = {"ai_eq_list": [0, 24, 26], "i_curr_eq": 0}
     answers = iter(["", "Pure Voice", ""])
 
     async def ask(prompt: str) -> str:
@@ -314,10 +315,10 @@ async def test_unknown_sound_modes_are_named(soundbar: FakeSoundbar) -> None:
     ) as client:
         report = await gather(client, name_modes=True, ask=ask, mode_wait=0)
 
-    assert report.mode_names == {23: "Pure Voice", 26: "nothing shown"}
+    assert report.mode_names == {24: "Pure Voice", 26: "nothing shown"}
     sent = [m["data"] async for m in _drain(soundbar) if m.get("cmd") == "set"]
-    assert sent == [{"i_curr_eq": 23}, {"i_curr_eq": 26}, {"i_curr_eq": 0}]
-    assert "| 23 | Pure Voice |" in render(report)
+    assert sent == [{"i_curr_eq": 24}, {"i_curr_eq": 26}, {"i_curr_eq": 0}]
+    assert "| 24 | Pure Voice |" in render(report)
 
 
 async def test_no_unknown_sound_modes_nothing_is_selected(
@@ -335,3 +336,54 @@ async def test_no_unknown_sound_modes_nothing_is_selected(
     assert report.mode_names == {}
     assert {m["cmd"] async for m in _drain(soundbar)} == {"get"}
     assert "Unknown sound modes" not in render(report)
+
+
+async def test_gather_guided_device_woken_by_requests(soundbar: FakeSoundbar) -> None:
+    """A device woken by the state requests is put in standby again, not asked again."""
+    answers = iter(["", "n", "", "", "", "y"])
+    received_before_turning_on: list[dict[str, object]] = []
+
+    async def ask(prompt: str) -> str:
+        if "standby again" in prompt:
+            # Forget the requests made so far, to see what follows
+            async for _ in _drain(soundbar):
+                pass
+        elif "on with its remote" in prompt:
+            received_before_turning_on.extend([m async for m in _drain(soundbar)])
+        return next(answers)
+
+    async with TemescalClient(
+        "127.0.0.1", soundbar.port, response_timeout=0.2
+    ) as client:
+        report = await gather(client, guided=True, ask=ask, power_wait=0)
+
+    assert received_before_turning_on == []
+    question = (
+        "Is it still in standby after being asked for its state"
+        " (standby with the remote)?"
+    )
+    assert report.power_answers[question] == "no"
+    assert report.on is not None
+
+
+async def test_gather_guided_power_command_ignored(soundbar: FakeSoundbar) -> None:
+    """A power command that did nothing leads to the remote, not to a meaningless question."""
+    answers = iter(["", "y", "", "n", "", "n", "", "", "y"])
+    prompts: list[str] = []
+
+    async def ask(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(answers)
+
+    async with TemescalClient(
+        "127.0.0.1", soundbar.port, response_timeout=0.2
+    ) as client:
+        report = await gather(
+            client, guided=True, try_power=True, ask=ask, power_wait=0
+        )
+
+    after_off = prompts.index("Did `set_power(False)` put it in standby? [y/n]")
+    assert prompts[after_off + 1].startswith("Put it in standby with its remote")
+    assert prompts[after_off + 2] == "Did `set_power(True)` turn it on? [y/n]"
+    assert prompts[after_off + 3].startswith("Turn it on with its remote")
+    assert report.power_answers["Did `set_power(False)` put it in standby?"] == "no"

@@ -27,7 +27,8 @@ What was learned on one <model>. It may or may not apply to other models.
 ## Inputs and sound modes
 
 Offered inputs and sound modes from the report, and any index reported as
-"without a name in aiotemescal", with the name the LG app shows for it.
+"without a name in aiotemescal", with the name the display of the device shows
+for it (`--name-modes` asks for it).
 
 ## Disconnections
 
