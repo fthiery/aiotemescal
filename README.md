@@ -205,10 +205,10 @@ uvx aiotemescal report 192.168.1.15 --guided --name-modes   # also asks the name
 - Without options, the report only asks the device for its state: nothing is
   changed. It lists what the device reports, the inputs and sound modes it
   offers, and the messages it does not answer.
-- `--guided` asks you to put the device in standby with its remote, to turn it
-  on with its remote, then to put it in standby the way you usually do (TV
-  off, for example). Steps can be skipped, for example without a remote at
-  hand. For each power change, the report says whether the device sent
+- `--guided` asks you to put the device in standby, then to turn it on, with
+  its remote, its own button or the LG app (not every model has a power button
+  in the app), then to put it in standby the way you usually do (TV off, for
+  example). Steps can be skipped, for example without a remote at hand. For each power change, the report says whether the device sent
   `b_powerstatus` by itself, only reported it when asked, or not at all, which
   tells whether, and how, its power state can be followed. It also compares
   its full state on and in standby, records every message the device sends by

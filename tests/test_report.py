@@ -207,8 +207,8 @@ async def test_gather_guided(soundbar: FakeSoundbar) -> None:
         )
 
     assert report.transitions == [
-        ("Standby with the remote", TRANSITION_PUSHED),
-        ("On with the remote", TRANSITION_ASKED),
+        ("Standby with the remote or the LG app", TRANSITION_PUSHED),
+        ("On with the remote or the LG app", TRANSITION_ASKED),
         ("`set_power(False)`", TRANSITION_NOT_REPORTED),
         ("`set_power(True)`", TRANSITION_ASKED),
         ("Standby the usual way", TRANSITION_NOT_REPORTED),
@@ -222,7 +222,7 @@ async def test_gather_guided(soundbar: FakeSoundbar) -> None:
     power = [m async for m in _drain(soundbar) if m.get("cmd") == "set"]
     assert [m["data"] for m in power] == [{"b_powerkey": False}, {"b_powerkey": True}]
     text = render(report)
-    assert f"- Standby with the remote: {TRANSITION_PUSHED}" in text
+    assert f"- Standby with the remote or the LG app: {TRANSITION_PUSHED}" in text
     assert "# standby with the remote" in text
 
 
@@ -239,8 +239,8 @@ async def test_gather_guided_steps_can_be_skipped(soundbar: FakeSoundbar) -> Non
         report = await gather(client, guided=True, ask=ask, power_wait=0)
 
     assert report.transitions == [
-        ("Standby with the remote", TRANSITION_SKIPPED),
-        ("On with the remote", TRANSITION_SKIPPED),
+        ("Standby with the remote or the LG app", TRANSITION_SKIPPED),
+        ("On with the remote or the LG app", TRANSITION_SKIPPED),
         ("Standby the usual way", TRANSITION_NOT_REPORTED),
     ]
     assert report.standby_remote is None

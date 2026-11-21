@@ -401,16 +401,16 @@ async def gather(
 
         skip = " Type s then Enter to skip this step."
         report.standby_remote = await transition(
-            "Standby with the remote",
+            "Standby with the remote or the LG app",
             False,
-            "Put the device in standby with its remote (or its own button), wait"
-            " until it is in standby, then press Enter." + skip,
+            "Put the device in standby with its remote, its own button or the LG app,"
+            " wait until it is in standby, then press Enter." + skip,
         )
         report.on = await transition(
-            "On with the remote",
+            "On with the remote or the LG app",
             True,
-            "Turn the device on with its remote (or its own button), wait until it"
-            " is on, then press Enter." + skip,
+            "Turn the device on with its remote, its own button or the LG app, wait"
+            " until it is on, then press Enter." + skip,
         )
 
         if name_modes:
