@@ -70,9 +70,11 @@ It does not support remote power control:
 
 - it never sends `b_powerstatus`, in any message, so its power state cannot be
   read directly;
-- it ignores `set_power()` (the `b_powerkey` key) whether it is on or in
-  standby, with either value, and sends no answer. The LG app has no power
-  button for it either.
+- `set_power(False)` (the `b_powerkey` key) does nothing, and no power command
+  gets an answer. `set_power(True)` sent after a standby by remote does turn
+  it on (its display shows OPT), but so does any other request (see below), so
+  this is not a working power command. The LG app has no power button for it
+  either.
 
 It turns on and off by following the TV over HDMI eARC, with `b_auto_power`
 enabled in `SETTING_VIEW_INFO`. On each change it sends `FUNC_VIEW_INFO`
