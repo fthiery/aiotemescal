@@ -197,8 +197,9 @@ the device:
 
 ```
 uvx aiotemescal report 192.168.1.15                         # read-only
-uvx aiotemescal report 192.168.1.15 --guided                # asks you to turn it on, then to standby
+uvx aiotemescal report 192.168.1.15 --guided                # asks you to put it in standby and on
 uvx aiotemescal report 192.168.1.15 --guided --try-power    # also tries the power commands
+uvx aiotemescal report 192.168.1.15 --guided --name-modes   # also asks the names of unknown sound modes
 ```
 
 - Without options, the report only asks the device for its state: nothing is
@@ -213,8 +214,12 @@ uvx aiotemescal report 192.168.1.15 --guided --try-power    # also tries the pow
   its full state on and in standby, records every message the device sends by
   itself, and asks whether asking for the state in standby woke it up.
 - `--try-power` also sends the power commands, which turn the device off and
-  on, and asks you whether they worked. It is the only option that changes the
-  device.
+  on, and asks you whether they worked.
+- `--name-modes` selects each sound mode that has no name in aiotemescal, asks
+  you which name the soundbar or the LG app shows for it, then restores the
+  current sound mode. It can be used with or without `--guided`.
+
+`--try-power` and `--name-modes` are the only options that change the device.
 
 Some behaviours only show up over time, or not every time: a device that stops
 sending updates while it is idle, or after being turned off by hand. The
@@ -326,9 +331,10 @@ The input and sound mode tables come from python-temescal and stop at the
 models it knew. The [SP8YA](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md#inputs-and-sound-modes)
 offers sound mode 23 and the [S95Q](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md#inputs-and-sound-modes)
 sound modes 23 to 26, which have no name yet; applications show them as
-unknown. Their names have to be found, for example as shown in the LG app, and added to
-`equalisers` in `const.py`, along with any index reported by other models.
-The report lists these indices under "without a name in aiotemescal".
+unknown. Their names have to be found and added to `equalisers` in
+`const.py`, along with any index reported by other models. The report lists
+these indices under "without a name in aiotemescal", and `--name-modes` asks
+for their names.
 
 ### Support for more models
 

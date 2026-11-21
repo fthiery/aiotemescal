@@ -299,3 +299,39 @@ def test_try_power_needs_guided(capsys: pytest.CaptureFixture[str]) -> None:
         main(["report", "10.0.0.2", "--try-power"])
 
     assert "--try-power needs --guided" in capsys.readouterr().err
+
+
+async def test_unknown_sound_modes_are_named(soundbar: FakeSoundbar) -> None:
+    """Each sound mode without a name is selected and named, then the mode is restored."""
+    soundbar.answers["EQ_VIEW_INFO"] = {"ai_eq_list": [0, 23, 26], "i_curr_eq": 0}
+    answers = iter(["", "Pure Voice", ""])
+
+    async def ask(prompt: str) -> str:
+        return next(answers)
+
+    async with TemescalClient(
+        "127.0.0.1", soundbar.port, response_timeout=0.2
+    ) as client:
+        report = await gather(client, name_modes=True, ask=ask, mode_wait=0)
+
+    assert report.mode_names == {23: "Pure Voice", 26: "nothing shown"}
+    sent = [m["data"] async for m in _drain(soundbar) if m.get("cmd") == "set"]
+    assert sent == [{"i_curr_eq": 23}, {"i_curr_eq": 26}, {"i_curr_eq": 0}]
+    assert "| 23 | Pure Voice |" in render(report)
+
+
+async def test_no_unknown_sound_modes_nothing_is_selected(
+    soundbar: FakeSoundbar,
+) -> None:
+    """A device whose sound modes all have a name is left as it is."""
+    soundbar.answers["EQ_VIEW_INFO"] = {"ai_eq_list": [0, 7], "i_curr_eq": 0}
+    ask = AsyncMock(return_value="")
+
+    async with TemescalClient(
+        "127.0.0.1", soundbar.port, response_timeout=0.2
+    ) as client:
+        report = await gather(client, name_modes=True, ask=ask, mode_wait=0)
+
+    assert report.mode_names == {}
+    assert {m["cmd"] async for m in _drain(soundbar)} == {"get"}
+    assert "Unknown sound modes" not in render(report)
