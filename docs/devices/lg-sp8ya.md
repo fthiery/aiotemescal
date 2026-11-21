@@ -90,8 +90,10 @@ Whether asking for its state wakes it depends on how it went to standby:
 
 - after going to standby by itself when the TV was turned off, it was asked
   several times on 2026-11-08 and stayed in standby;
-- after being put in standby with its remote, on 2026-11-21, a request
-  (`SPK_LIST_VIEW_INFO`) turned it on, on its optical input, while opening the
+- after being put in standby with its remote, on 2026-11-21, any request
+  turned it on, on its optical input: each of `PRODUCT_INFO`,
+  `UPDATE_VIEW_INFO`, `EQ_VIEW_INFO`, `SETTING_VIEW_INFO`, `PLAY_INFO`,
+  `FUNC_VIEW_INFO` and `SPK_LIST_VIEW_INFO` was tried alone. Opening the
   connection without sending anything did not.
 
 Turning it off or on with the remote is not reported at all: no message is
