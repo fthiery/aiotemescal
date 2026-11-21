@@ -43,6 +43,8 @@ REPORT_MESSAGES = (
 RESPONSE_TIMEOUT = 2.0
 # Time given to the device to settle after a power command
 POWER_WAIT = 10.0
+# Time given to the device to show a sound mode before asking for its name
+MODE_WAIT = 2.0
 
 TRANSITION_PUSHED = "`b_powerstatus` sent by the device by itself"
 TRANSITION_ASKED = "`b_powerstatus` only reported when asked"
@@ -75,6 +77,8 @@ class Report:
     power_answers: dict[str, str] = field(default_factory=dict)
     # How each power change was reported: step, then one of the TRANSITION_*
     transitions: list[tuple[str, str]] = field(default_factory=list)
+    # Name shown by the device or the LG app for each unknown sound mode
+    mode_names: dict[int, str] = field(default_factory=dict)
     # Seconds since the start, what happened, and the data of a message
     timeline: list[tuple[float, str, Any]] = field(default_factory=list)
 
@@ -193,6 +197,7 @@ def _redact_report(report: Report) -> Report:
         standby=redact(report.standby),
         power_answers=report.power_answers,
         transitions=report.transitions,
+        mode_names=report.mode_names,
         timeline=[(when, event, redact(data)) for when, event, data in report.timeline],
     )
 
@@ -244,6 +249,16 @@ def render(report: Report, *, redacted: bool = True) -> str:
             f"- {question} **{answer}**"
             for question, answer in report.power_answers.items()
         ]
+
+    if report.mode_names:
+        lines += [
+            "",
+            "### Unknown sound modes",
+            "",
+            "| `i_curr_eq` | Name shown |",
+            "| --- | --- |",
+        ]
+        lines += [f"| {index} | {name} |" for index, name in report.mode_names.items()]
 
     if report.timeline:
         lines += ["", "### Timeline", "", "| Time | Event |", "| --- | --- |"]
@@ -297,8 +312,10 @@ async def gather(
     *,
     guided: bool = False,
     try_power: bool = False,
+    name_modes: bool = False,
     ask: Ask = _ask,
     power_wait: float = POWER_WAIT,
+    mode_wait: float = MODE_WAIT,
 ) -> Report:
     """Collect a report from a connected client, asking the user when guided."""
     start = time.monotonic()
@@ -319,9 +336,33 @@ async def gather(
         client.subscribe(on_message),
         client.subscribe_connection(on_connection),
     )
+
+    async def name_unknown_modes(snapshot: Snapshot) -> None:
+        """Select each sound mode without a name, ask for its name, then restore."""
+        eq = _data(snapshot, MSG_EQ_VIEW_INFO)
+        unknown = [i for i in eq.get("ai_eq_list") or [] if i >= len(equalisers)]
+        original = eq.get("i_curr_eq")
+        try:
+            for index in unknown:
+                note(f"sent set_eq({index})")
+                await client.set_eq(index)
+                await asyncio.sleep(mode_wait)
+                name = await ask(
+                    f"Sound mode {index} is selected. What name does the soundbar"
+                    " or the LG app show? (just Enter if none)"
+                )
+                report.mode_names[index] = name or "nothing shown"
+        finally:
+            if unknown and original is not None:
+                note(f"sent set_eq({original})")
+                await client.set_eq(original)
+
     try:
         report = Report(snapshot=await collect(client), timeline=timeline)
         if not guided:
+            if name_modes:
+                await ask("Make sure the device is on, then press Enter.")
+                await name_unknown_modes(report.snapshot)
             return report
 
         async def transition(
@@ -360,17 +401,22 @@ async def gather(
 
         skip = " Type s then Enter to skip this step."
         report.standby_remote = await transition(
-            "Standby with the remote",
+            "Standby with the remote or the LG app",
             False,
-            "Put the device in standby with its remote (or its own button), wait"
-            " until it is in standby, then press Enter." + skip,
+            "Put the device in standby with its remote, its own button or the LG app,"
+            " wait until it is in standby, then press Enter." + skip,
         )
         report.on = await transition(
-            "On with the remote",
+            "On with the remote or the LG app",
             True,
-            "Turn the device on with its remote (or its own button), wait until it"
-            " is on, then press Enter." + skip,
+            "Turn the device on with its remote, its own button or the LG app, wait"
+            " until it is on, then press Enter." + skip,
         )
+
+        if name_modes:
+            if report.on is None:
+                await ask("Make sure the device is on, then press Enter.")
+            await name_unknown_modes(report.on or report.snapshot)
 
         if try_power and report.on is not None:
             await transition("`set_power(False)`", False)
@@ -402,7 +448,12 @@ async def gather(
 async def _run(args: argparse.Namespace) -> str:
     client = TemescalClient(args.host, args.port, response_timeout=RESPONSE_TIMEOUT)
     async with client:
-        report = await gather(client, guided=args.guided, try_power=args.try_power)
+        report = await gather(
+            client,
+            guided=args.guided,
+            try_power=args.try_power,
+            name_modes=args.name_modes,
+        )
     return render(report, redacted=not args.no_redact)
 
 
@@ -424,10 +475,20 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--no-redact", action="store_true", help="keep addresses, identifiers and names"
     )
+    parser.add_argument(
+        "--name-modes",
+        action="store_true",
+        help="select each sound mode without a name and ask you for its name",
+    )
     parser.add_argument("-o", "--output", help="write the report to this file")
     args = parser.parse_args(argv)
     if args.try_power and not args.guided:
         parser.error("--try-power needs --guided")
+    if args.name_modes:
+        sys.stderr.write(
+            "--name-modes selects each sound mode without a name, then restores"
+            " the current one.\n"
+        )
     if args.try_power:
         sys.stderr.write(
             "--try-power sends the power commands, which turn the device off and on.\n"
