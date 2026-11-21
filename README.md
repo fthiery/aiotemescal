@@ -196,7 +196,8 @@ useful contribution, even if everything works.
 ### Report your device
 
 With [uv](https://docs.astral.sh/uv/), from any machine on the same network as
-the device:
+the device, with the LG app closed (it queries the device, which interferes
+with what the report observes):
 
 ```
 uvx aiotemescal report 192.168.1.15                         # read-only
@@ -220,9 +221,11 @@ uvx aiotemescal report 192.168.1.15 --guided --name-modes   # also asks the name
   device up; if it did, it asks you to put it in standby again, without
   reading the state, before turning it on.
 - `--try-power` also sends the power commands, which turn the device off and
-  on, and asks you whether they worked.
+  on, and asks you whether they worked, before reading the state. If one did
+  nothing, it asks you to use the remote instead, so that the next one can
+  still be checked.
 - `--name-modes` selects each sound mode that has no name in aiotemescal, asks
-  you which name the soundbar or the LG app shows for it, then restores the
+  you which name the display of the soundbar shows for it, then restores the
   current sound mode. It can be used with or without `--guided`.
 
 `--try-power` and `--name-modes` are the only options that change the device.
@@ -243,8 +246,7 @@ replaced with `<redacted>`; `--no-redact` keeps them. Read it before posting.
 
 Then [open an issue](https://github.com/fthiery/aiotemescal//issues/new?template=device_report.md)
 with the report, and anything you noticed that the report cannot see: how the
-device is connected to the TV, whether it loses the connection by itself, what
-the LG app shows for an unknown sound mode.
+device is connected to the TV, whether it loses the connection by itself.
 
 Example, a read-only report of the tested SP8YA while in standby:
 
@@ -349,10 +351,10 @@ unavailable when the reconnection succeeds right away.
 ### Unknown inputs and sound modes
 
 The input and sound mode tables come from python-temescal and stop at the
-models it knew. The [SP8YA](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md#inputs-and-sound-modes)
-offers sound mode 23 and the [S95Q](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md#inputs-and-sound-modes)
-sound modes 23 to 26, which have no name yet; applications show them as
-unknown. Their names have to be found and added to `equalisers` in
+models it knew. Sound mode 23 was named "Sound Share" from the display of the
+[SP8YA](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md#inputs-and-sound-modes); the
+[S95Q](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md#inputs-and-sound-modes) also offers modes 24
+to 26, which have no name yet; applications show them as unknown. Their names have to be found and added to `equalisers` in
 `const.py`, along with any index reported by other models. The report lists
 these indices under "without a name in aiotemescal", and `--name-modes` asks
 for their names.

@@ -10,6 +10,7 @@ from aiotemescal.__main__ import main
 from aiotemescal.report import (
     REDACTED,
     TRANSITION_ASKED,
+    TRANSITION_NOT_PUSHED,
     TRANSITION_NOT_REPORTED,
     TRANSITION_PUSHED,
     TRANSITION_SKIPPED,
@@ -35,7 +36,7 @@ ON: Snapshot = {
         "s_spk_bt_name": "Salle TV",
     },
     "SPK_LIST_VIEW_INFO": {"i_vol": 15, "i_curr_func": 20, "s_user_name": "Salle TV"},
-    "EQ_VIEW_INFO": {"ai_eq_list": [19, 0, 23], "i_curr_eq": 0},
+    "EQ_VIEW_INFO": {"ai_eq_list": [19, 0, 24], "i_curr_eq": 0},
     "PRODUCT_INFO": {"s_model_name": "SP8YA"},
     "UPDATE_VIEW_INFO": {
         "o_system_ver": {
@@ -86,7 +87,7 @@ def test_analyse() -> None:
     )
     assert any(f.startswith("Power state: not reported") for f in findings)
     assert "Unique id: not reported (no `s_uuid`)" in findings
-    assert "Sound modes without a name in aiotemescal: 23" in findings
+    assert "Sound modes without a name in aiotemescal: 24" in findings
     assert "Current input: 20 (E-ARC)" in findings
     assert "No answer to: `MAC_INFO_DEV`" in findings
 
@@ -209,8 +210,8 @@ async def test_gather_guided(soundbar: FakeSoundbar) -> None:
     assert report.transitions == [
         ("Standby with the remote", TRANSITION_PUSHED),
         ("On with the remote", TRANSITION_ASKED),
-        ("`set_power(False)`", TRANSITION_NOT_REPORTED),
-        ("`set_power(True)`", TRANSITION_ASKED),
+        ("`set_power(False)`", TRANSITION_NOT_PUSHED),
+        ("`set_power(True)`", TRANSITION_NOT_PUSHED),
         ("Standby the usual way", TRANSITION_NOT_REPORTED),
     ]
     assert list(report.power_answers.values()) == ["yes", "yes", "no", "yes"]
@@ -303,7 +304,7 @@ def test_try_power_needs_guided(capsys: pytest.CaptureFixture[str]) -> None:
 
 async def test_unknown_sound_modes_are_named(soundbar: FakeSoundbar) -> None:
     """Each sound mode without a name is selected and named, then the mode is restored."""
-    soundbar.answers["EQ_VIEW_INFO"] = {"ai_eq_list": [0, 23, 26], "i_curr_eq": 0}
+    soundbar.answers["EQ_VIEW_INFO"] = {"ai_eq_list": [0, 24, 26], "i_curr_eq": 0}
     answers = iter(["", "Pure Voice", ""])
 
     async def ask(prompt: str) -> str:
@@ -314,10 +315,10 @@ async def test_unknown_sound_modes_are_named(soundbar: FakeSoundbar) -> None:
     ) as client:
         report = await gather(client, name_modes=True, ask=ask, mode_wait=0)
 
-    assert report.mode_names == {23: "Pure Voice", 26: "nothing shown"}
+    assert report.mode_names == {24: "Pure Voice", 26: "nothing shown"}
     sent = [m["data"] async for m in _drain(soundbar) if m.get("cmd") == "set"]
-    assert sent == [{"i_curr_eq": 23}, {"i_curr_eq": 26}, {"i_curr_eq": 0}]
-    assert "| 23 | Pure Voice |" in render(report)
+    assert sent == [{"i_curr_eq": 24}, {"i_curr_eq": 26}, {"i_curr_eq": 0}]
+    assert "| 24 | Pure Voice |" in render(report)
 
 
 async def test_no_unknown_sound_modes_nothing_is_selected(
@@ -363,3 +364,26 @@ async def test_gather_guided_device_woken_by_requests(soundbar: FakeSoundbar) ->
     )
     assert report.power_answers[question] == "no"
     assert report.on is not None
+
+
+async def test_gather_guided_power_command_ignored(soundbar: FakeSoundbar) -> None:
+    """A power command that did nothing leads to the remote, not to a meaningless question."""
+    answers = iter(["", "y", "", "n", "", "n", "", "", "y"])
+    prompts: list[str] = []
+
+    async def ask(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(answers)
+
+    async with TemescalClient(
+        "127.0.0.1", soundbar.port, response_timeout=0.2
+    ) as client:
+        report = await gather(
+            client, guided=True, try_power=True, ask=ask, power_wait=0
+        )
+
+    after_off = prompts.index("Did `set_power(False)` put it in standby? [y/n]")
+    assert prompts[after_off + 1].startswith("Put it in standby with its remote")
+    assert prompts[after_off + 2] == "Did `set_power(True)` turn it on? [y/n]"
+    assert prompts[after_off + 3].startswith("Turn it on with its remote")
+    assert report.power_answers["Did `set_power(False)` put it in standby?"] == "no"

@@ -44,6 +44,7 @@ equalisers = [
     "Clear Voice",
     "Sports",
     "Game",
+    "Sound Share",
 ]
 
 # Indexed by the i_curr_func / ai_func_list values reported by the device

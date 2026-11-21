@@ -49,6 +49,7 @@ MODE_WAIT = 2.0
 TRANSITION_PUSHED = "`b_powerstatus` sent by the device by itself"
 TRANSITION_ASKED = "`b_powerstatus` only reported when asked"
 TRANSITION_NOT_REPORTED = "no matching `b_powerstatus`"
+TRANSITION_NOT_PUSHED = "`b_powerstatus` not sent by the device by itself"
 TRANSITION_LOST = "connection lost"
 TRANSITION_SKIPPED = "skipped"
 
@@ -77,7 +78,7 @@ class Report:
     power_answers: dict[str, str] = field(default_factory=dict)
     # How each power change was reported: step, then one of the TRANSITION_*
     transitions: list[tuple[str, str]] = field(default_factory=list)
-    # Name shown by the device or the LG app for each unknown sound mode
+    # Name shown on the display of the device for each unknown sound mode
     mode_names: dict[int, str] = field(default_factory=dict)
     # Seconds since the start, what happened, and the data of a message
     timeline: list[tuple[float, str, Any]] = field(default_factory=list)
@@ -348,8 +349,8 @@ async def gather(
                 await client.set_eq(index)
                 await asyncio.sleep(mode_wait)
                 name = await ask(
-                    f"Sound mode {index} is selected. What name does the soundbar"
-                    " or the LG app show? (just Enter if none)"
+                    f"Sound mode {index} is selected. What name does the display of"
+                    " the soundbar show? (just Enter if none)"
                 )
                 report.mode_names[index] = name or "nothing shown"
         finally:
@@ -366,9 +367,13 @@ async def gather(
             return report
 
         async def transition(
-            step: str, power_on: bool, prompt: str | None = None
+            step: str, power_on: bool, prompt: str | None = None, *, read: bool = True
         ) -> Snapshot | None:
-            """Wait for a power change, by the user or a command, and record it."""
+            """Wait for a power change, by the user or a command, and record it.
+
+            Without read, the state is not asked for, since that can wake a device
+            in standby: only what the device sends by itself is used.
+            """
             mark = len(timeline)
             if prompt is None:
                 note(f"sent set_power({power_on})")
@@ -385,6 +390,11 @@ async def gather(
                 and data.get("b_powerstatus") is power_on
                 for _, event, data in timeline[mark:]
             )
+            if not read:
+                report.transitions.append(
+                    (step, TRANSITION_PUSHED if pushed else TRANSITION_NOT_PUSHED)
+                )
+                return None
             snapshot = await _collect_or_none(client)
             if pushed:
                 result = TRANSITION_PUSHED
@@ -440,13 +450,26 @@ async def gather(
             await name_unknown_modes(report.on or report.snapshot)
 
         if try_power and report.on is not None:
-            await transition("`set_power(False)`", False)
+            # Asked before reading the state, which can wake a device in standby
+            await transition("`set_power(False)`", False, read=False)
             question = "Did `set_power(False)` put it in standby?"
             report.power_answers[question] = await _yes_no(ask, question)
-            await transition("`set_power(True)`", True)
-            question = "Did `set_power(True)` turn it back on?"
+            if report.power_answers[question] == "no":
+                # set_power(True) can only be checked on a device in standby
+                await ask(
+                    "Put it in standby with its remote or its own button, wait until"
+                    " it is in standby, then press Enter."
+                )
+                note("user: standby with the remote for set_power(True)")
+            await transition("`set_power(True)`", True, read=False)
+            question = "Did `set_power(True)` turn it on?"
             report.power_answers[question] = await _yes_no(ask, question)
-            await ask("Make sure it is on again, then press Enter.")
+            if report.power_answers[question] == "no":
+                await ask(
+                    "Turn it on with its remote or its own button, wait until it is"
+                    " on, then press Enter."
+                )
+                note("user: on with the remote after set_power(True)")
 
         report.standby = await transition(
             "Standby the usual way",
@@ -510,6 +533,10 @@ def main(argv: list[str] | None = None) -> None:
         sys.stderr.write(
             "--try-power sends the power commands, which turn the device off and on.\n"
         )
+    sys.stderr.write(
+        "Keep the LG app closed during the report: it queries the device, which"
+        " interferes with what the report observes.\n"
+    )
 
     try:
         text = asyncio.run(_run(args))

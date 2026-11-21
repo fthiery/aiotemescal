@@ -27,7 +27,8 @@ It may or may not apply to other models.
   ARC), 6 (HDMI), 10 (HDMI2), 19 (USB2). The current input is 20 (E-ARC) when
   on with the TV.
 - Sound modes offered (`ai_eq_list`): 19, 0, 7, 26, 21, 6, 22, 14, 5, 15, 23,
-  24 and 25. Modes 23 to 26 have no name in aiotemescal yet.
+  24 and 25. Mode 23 is presumably "Sound Share", as on the SP8YA; modes 24 to 26
+  have no name in aiotemescal yet.
 - The volume goes from 0 to 100 (`i_vol_max`), against 40 on the SP8YA.
 
 ## Power

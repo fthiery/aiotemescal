@@ -31,9 +31,9 @@ What was learned on one SP8YA. It may or may not apply to other models.
   ARC), 6 (HDMI), 19 (USB2). The current input is often one that is not in
   that list: 20 (E-ARC) when on, 4 (Optical) in standby.
 - Sound modes offered (`ai_eq_list`): 19, 0, 7, 20, 21, 6, 22, 14, 5, 15 and
-  23. Mode 23 has no name in aiotemescal yet; the LG app shows it as
-  "Synchronisé avec la télévision" in French ("synchronised with the TV"; the
-  English name is still to be found).
+  23. Mode 23 shows as "Sound Share" on the display of the soundbar (the LG
+  app shows "Synchronisé avec la télévision" in French), and is named so in
+  aiotemescal.
 
 ## Daily restart
 
