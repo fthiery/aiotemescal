@@ -215,8 +215,10 @@ uvx aiotemescal report 192.168.1.15 --guided --name-modes   # also asks the name
   can wake it up and hides what the device reports by itself. For each power change, the report says whether the device sent
   `b_powerstatus` by itself, only reported it when asked, or not at all, which
   tells whether, and how, its power state can be followed. It also compares
-  its full state on and in standby, records every message the device sends by
-  itself, and asks whether asking for the state in standby woke it up.
+  its full state on and in standby, and records every message the device sends
+  by itself. After each standby, it asks whether reading the state woke the
+  device up; if it did, it asks you to put it in standby again, without
+  reading the state, before turning it on.
 - `--try-power` also sends the power commands, which turn the device off and
   on, and asks you whether they worked.
 - `--name-modes` selects each sound mode that has no name in aiotemescal, asks

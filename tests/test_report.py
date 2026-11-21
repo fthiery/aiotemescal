@@ -176,7 +176,7 @@ def test_render_standby_lost() -> None:
 async def test_gather_guided(soundbar: FakeSoundbar) -> None:
     """Each power change says whether the device reported it, and how."""
     soundbar.answers["SPK_LIST_VIEW_INFO"] = {"b_powerstatus": True}
-    answers = iter(["", "", "y", "n", "", "", "y"])
+    answers = iter(["", "y", "", "y", "n", "", "", "y"])
 
     async def ask(prompt: str) -> str:
         if "standby with its remote" in prompt:
@@ -213,7 +213,7 @@ async def test_gather_guided(soundbar: FakeSoundbar) -> None:
         ("`set_power(True)`", TRANSITION_ASKED),
         ("Standby the usual way", TRANSITION_NOT_REPORTED),
     ]
-    assert list(report.power_answers.values()) == ["yes", "no", "yes"]
+    assert list(report.power_answers.values()) == ["yes", "yes", "no", "yes"]
     assert report.on is not None
     assert report.standby is not None
     assert diff(report.on, report.standby) == [
@@ -335,3 +335,31 @@ async def test_no_unknown_sound_modes_nothing_is_selected(
     assert report.mode_names == {}
     assert {m["cmd"] async for m in _drain(soundbar)} == {"get"}
     assert "Unknown sound modes" not in render(report)
+
+
+async def test_gather_guided_device_woken_by_requests(soundbar: FakeSoundbar) -> None:
+    """A device woken by the state requests is put in standby again, not asked again."""
+    answers = iter(["", "n", "", "", "", "y"])
+    received_before_turning_on: list[dict[str, object]] = []
+
+    async def ask(prompt: str) -> str:
+        if "standby again" in prompt:
+            # Forget the requests made so far, to see what follows
+            async for _ in _drain(soundbar):
+                pass
+        elif "on with its remote" in prompt:
+            received_before_turning_on.extend([m async for m in _drain(soundbar)])
+        return next(answers)
+
+    async with TemescalClient(
+        "127.0.0.1", soundbar.port, response_timeout=0.2
+    ) as client:
+        report = await gather(client, guided=True, ask=ask, power_wait=0)
+
+    assert received_before_turning_on == []
+    question = (
+        "Is it still in standby after being asked for its state"
+        " (standby with the remote)?"
+    )
+    assert report.power_answers[question] == "no"
+    assert report.on is not None

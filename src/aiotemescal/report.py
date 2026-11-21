@@ -399,6 +399,17 @@ async def gather(
             report.transitions.append((step, result))
             return snapshot
 
+        async def still_in_standby(after: str) -> bool:
+            """Ask whether the requests that read the state woke the device up."""
+            # Some models (SP8YA) wake up when they receive any request in standby
+            note("asked for the state in standby")
+            await asyncio.sleep(power_wait)
+            question = (
+                f"Is it still in standby after being asked for its state ({after})?"
+            )
+            report.power_answers[question] = await _yes_no(ask, question)
+            return report.power_answers[question] == "yes"
+
         skip = " Type s then Enter to skip this step."
         report.standby_remote = await transition(
             "Standby with the remote",
@@ -407,6 +418,15 @@ async def gather(
             " LG app, which queries the device), wait until it is in standby, then"
             " press Enter." + skip,
         )
+        if report.standby_remote is not None and not await still_in_standby(
+            "standby with the remote"
+        ):
+            # Not asked for its state this time, so that it stays in standby
+            await ask(
+                "Put it in standby again with its remote or its own button, wait"
+                " until it is in standby, then press Enter."
+            )
+            note("user: standby with the remote again")
         report.on = await transition(
             "On with the remote",
             True,
@@ -435,11 +455,7 @@ async def gather(
             " example), wait 30 seconds, then press Enter." + skip,
         )
         if report.standby is not None:
-            # Some models are said to wake up when asked for their state in standby
-            note("asked for the state in standby")
-            await asyncio.sleep(power_wait)
-            question = "Is it still in standby after being asked for its state?"
-            report.power_answers[question] = await _yes_no(ask, question)
+            await still_in_standby("standby the usual way")
         return report
     finally:
         for callback in unsubscribe:
