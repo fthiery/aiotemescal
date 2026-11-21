@@ -47,7 +47,7 @@ Features:
   - [Test against your device](#test-against-your-device)
 - [Future work](#future-work)
   - [Devices without power control](#devices-without-power-control)
-  - [Waking devices in standby](#waking-devices-in-standby)
+  - [Devices that go silent after a manual shutdown](#devices-that-go-silent-after-a-manual-shutdown)
   - [Unknown inputs and sound modes](#unknown-inputs-and-sound-modes)
   - [Support for more models](#support-for-more-models)
   - [Power loss detection outside Linux](#power-loss-detection-outside-linux)
@@ -138,7 +138,12 @@ default), the client asks it for `SPK_LIST_VIEW_INFO`. If no answer arrives,
 the connection is closed and opened again, which requests the whole state.
 Devices in standby and devices that do not report their power state are never
 asked, so this does not apply to the SP8YA. The LG S95Q was reported to behave
-this way (see its [device page]({B}docs/devices/lg-s95q.md)).
+this way (see its [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md)).
+
+Asking a device in standby for its state is safe on the models tested so far:
+neither the SP8YA nor the S95Q wakes up, which the guided report checks. The
+client therefore asks for the whole state on every connection, including while
+the device is in standby.
 
 ## Debugging
 
@@ -165,7 +170,7 @@ make test-power-cycle TEMESCAL_HOST=192.168.1.127  # asks you to unplug and repl
 | Model | Firmware (main / micom / Chromecast) | Notes |
 | --- | --- | --- |
 | LG SP8YA | 2407090 / 2207202 / 1.56.310669 | [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md) |
-| LG S95Q | unknown | second-hand, [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md) |
+| LG S95Q (S95QR) | 2603241 / 2501151 / 1.56.310669 | [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md) |
 
 Models that worked with python-temescal are expected to work too; this table
 only lists the ones tested with aiotemescal itself. The versions are those
@@ -289,23 +294,23 @@ whether it did anything. This needs to be handled:
 Reports from other models (see [Contributing](#contributing)) are needed to
 know which models are affected and which fields can be trusted.
 
-### Waking devices in standby
+### Devices that go silent after a manual shutdown
 
-The S95Q is said to wake up when asked for its state while in standby. The
-client asks for the whole state on every connection, including reconnections
-while the device is in standby, for example after its daily restart. If this
-is confirmed, the client should not ask anything on reconnection when the
-device last reported being off, and wait for it to report turning on. To check
-a device, run `aiotemescal report HOST --guided`: after the device is put in
-standby, the report asks it for its state and then asks you whether it is
-still in standby. The SP8YA stays in standby.
+On the S95Q, the connection sometimes stops delivering updates after the
+device is turned off by hand, while the socket still looks open, so the next
+power-on is never reported. The check of [silent devices](#silent-devices)
+only covers devices that are on, so it misses this case. A possible fix is to
+ask the device for its state a few seconds after it reports turning off, and
+to reconnect if it does not answer, without reporting the device as
+unavailable when the reconnection succeeds right away.
 
 ### Unknown inputs and sound modes
 
 The input and sound mode tables come from python-temescal and stop at the
 models it knew. The [SP8YA](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md#inputs-and-sound-modes)
-offers sound mode 23, which has no name yet; applications show it as unknown.
-Its name has to be found, for example as shown in the LG app, and added to
+offers sound mode 23 and the [S95Q](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md#inputs-and-sound-modes)
+sound modes 23 to 26, which have no name yet; applications show them as
+unknown. Their names have to be found, for example as shown in the LG app, and added to
 `equalisers` in `const.py`, along with any index reported by other models.
 The report lists these indices under "without a name in aiotemescal".
 
