@@ -1,5 +1,6 @@
 """Tests for the device report."""
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -8,6 +9,10 @@ from aiotemescal import TemescalClient
 from aiotemescal.__main__ import main
 from aiotemescal.report import (
     REDACTED,
+    TRANSITION_ASKED,
+    TRANSITION_NOT_REPORTED,
+    TRANSITION_PUSHED,
+    TRANSITION_SKIPPED,
     REPORT_MESSAGES,
     Report,
     Snapshot,
@@ -169,20 +174,29 @@ def test_render_standby_lost() -> None:
 
 
 async def test_gather_guided(soundbar: FakeSoundbar) -> None:
-    """Guided mode reads the state when on and in standby, and records pushed messages."""
-    soundbar.answers["FUNC_VIEW_INFO"] = {"b_connect": True}
-    answers = iter(["", "y", "n", "", "", "y"])
+    """Each power change says whether the device reported it, and how."""
+    soundbar.answers["SPK_LIST_VIEW_INFO"] = {"b_powerstatus": True}
+    answers = iter(["", "", "y", "n", "", "", "y"])
 
     async def ask(prompt: str) -> str:
-        if "standby the way" in prompt:
-            soundbar.answers["FUNC_VIEW_INFO"] = {"b_connect": False}
+        if "standby with its remote" in prompt:
+            # Reported by itself
+            soundbar.answers["SPK_LIST_VIEW_INFO"] = {"b_powerstatus": False}
             await soundbar.push(
                 {
                     "cmd": "notibyset",
-                    "msg": "FUNC_VIEW_INFO",
-                    "data": {"b_connect": False},
+                    "msg": "SPK_LIST_VIEW_INFO",
+                    "data": {"b_powerstatus": False},
                 }
             )
+            # The user presses Enter once the device has changed
+            await asyncio.sleep(0.1)
+        elif "on with its remote" in prompt:
+            # Only reported when asked
+            soundbar.answers["SPK_LIST_VIEW_INFO"] = {"b_powerstatus": True}
+        elif "the way you usually do" in prompt:
+            # Not reported at all, but another field changes
+            soundbar.answers["FUNC_VIEW_INFO"] = {"b_connect": False}
         return next(answers)
 
     async with TemescalClient(
@@ -192,17 +206,46 @@ async def test_gather_guided(soundbar: FakeSoundbar) -> None:
             client, guided=True, try_power=True, ask=ask, power_wait=0
         )
 
+    assert report.transitions == [
+        ("Standby with the remote", TRANSITION_PUSHED),
+        ("On with the remote", TRANSITION_ASKED),
+        ("`set_power(False)`", TRANSITION_NOT_REPORTED),
+        ("`set_power(True)`", TRANSITION_ASKED),
+        ("Standby the usual way", TRANSITION_NOT_REPORTED),
+    ]
+    assert list(report.power_answers.values()) == ["yes", "no", "yes"]
     assert report.on is not None
     assert report.standby is not None
     assert diff(report.on, report.standby) == [
-        ("FUNC_VIEW_INFO", "b_connect", True, False)
+        ("FUNC_VIEW_INFO", "b_connect", None, False)
     ]
-    assert list(report.power_answers.values()) == ["yes", "no", "yes"]
-    events = [(event, data) for _, event, data in report.timeline]
-    assert ("sent set_power(False)", None) in events
-    assert ("`FUNC_VIEW_INFO`", {"b_connect": False}) in events
     power = [m async for m in _drain(soundbar) if m.get("cmd") == "set"]
     assert [m["data"] for m in power] == [{"b_powerkey": False}, {"b_powerkey": True}]
+    text = render(report)
+    assert f"- Standby with the remote: {TRANSITION_PUSHED}" in text
+    assert "# standby with the remote" in text
+
+
+async def test_gather_guided_steps_can_be_skipped(soundbar: FakeSoundbar) -> None:
+    """A device without a remote at hand can skip the remote steps."""
+    answers = iter(["s", "s", "", "y"])
+
+    async def ask(prompt: str) -> str:
+        return next(answers)
+
+    async with TemescalClient(
+        "127.0.0.1", soundbar.port, response_timeout=0.2
+    ) as client:
+        report = await gather(client, guided=True, ask=ask, power_wait=0)
+
+    assert report.transitions == [
+        ("Standby with the remote", TRANSITION_SKIPPED),
+        ("On with the remote", TRANSITION_SKIPPED),
+        ("Standby the usual way", TRANSITION_NOT_REPORTED),
+    ]
+    assert report.standby_remote is None
+    assert report.on is None
+    assert report.standby is not None
 
 
 async def test_gather_read_only(soundbar: FakeSoundbar) -> None:

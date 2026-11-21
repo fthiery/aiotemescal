@@ -25,7 +25,7 @@ It may or may not apply to other models.
 
 - Inputs offered (`ai_func_list`): 0 (Wi-Fi), 1 (Bluetooth), 15 (Optical/HDMI
   ARC), 6 (HDMI), 10 (HDMI2), 19 (USB2). The current input is 20 (E-ARC) when
-  on with the TV, and 0 (Wi-Fi) in standby.
+  on with the TV.
 - Sound modes offered (`ai_eq_list`): 19, 0, 7, 26, 21, 6, 22, 14, 5, 15, 23,
   24 and 25. Modes 23 to 26 have no name in aiotemescal yet.
 - The volume goes from 0 to 100 (`i_vol_max`), against 40 on the SP8YA.
@@ -36,9 +36,14 @@ It may or may not apply to other models.
   can be followed.
 - `set_power()` works both ways: `b_powerkey` false puts it in standby and true
   turns it back on, and each change is reported right away.
-- Between on and standby, `b_powerstatus`, `i_curr_func` (20 to 0) and
-  `s_audio_source` (`" PCM "` to `"NO SIGNAL"`) change. Unlike on the SP8YA,
-  `b_connect` stays `true` in standby.
+- During the guided report, the input was switched to HDMI, HDMI2, USB2 and
+  then Wi-Fi before the soundbar went to standby by itself, so the comparison
+  between on and standby mixes the input change with the power change: only
+  `b_powerstatus` and `s_audio_source` (`" PCM "` to `"NO SIGNAL"`) can be
+  attributed to standby. `b_connect` seems to follow the connection of the
+  current input rather than the power state (it was `true` on Wi-Fi), and is
+  not needed here since `b_powerstatus` is reported. A new run of the guided
+  report, without changing input, would confirm it.
 - It also pushes `DIAG_INFO` messages about the connection of its rear speakers
   and subwoofer (`b_rear_l_connected`, `b_rear_r_connected`,
   `b_woofer_connected`) while it turns on.

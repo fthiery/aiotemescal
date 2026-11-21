@@ -44,6 +44,12 @@ RESPONSE_TIMEOUT = 2.0
 # Time given to the device to settle after a power command
 POWER_WAIT = 10.0
 
+TRANSITION_PUSHED = "`b_powerstatus` sent by the device by itself"
+TRANSITION_ASKED = "`b_powerstatus` only reported when asked"
+TRANSITION_NOT_REPORTED = "no matching `b_powerstatus`"
+TRANSITION_LOST = "connection lost"
+TRANSITION_SKIPPED = "skipped"
+
 REDACTED = "<redacted>"
 _REDACTED_KEYS = re.compile(r"(ssid|mac|uuid|ip(v[46])?_addr|user_name|bt_name)")
 _REDACTED_VALUES = re.compile(
@@ -63,9 +69,12 @@ class Report:
     """Everything collected from a device."""
 
     snapshot: Snapshot
+    standby_remote: Snapshot | None = None
     on: Snapshot | None = None
     standby: Snapshot | None = None
     power_answers: dict[str, str] = field(default_factory=dict)
+    # How each power change was reported: step, then one of the TRANSITION_*
+    transitions: list[tuple[str, str]] = field(default_factory=list)
     # Seconds since the start, what happened, and the data of a message
     timeline: list[tuple[float, str, Any]] = field(default_factory=list)
 
@@ -179,9 +188,11 @@ def redact(value: Any) -> Any:
 def _redact_report(report: Report) -> Report:
     return Report(
         snapshot=redact(report.snapshot),
+        standby_remote=redact(report.standby_remote),
         on=redact(report.on),
         standby=redact(report.standby),
         power_answers=report.power_answers,
+        transitions=report.transitions,
         timeline=[(when, event, redact(data)) for when, event, data in report.timeline],
     )
 
@@ -210,13 +221,14 @@ def render(report: Report, *, redacted: bool = True) -> str:
         *(f"- {finding}" for finding in analyse(report.snapshot)),
     ]
 
+    standby = report.standby or report.standby_remote
     if report.on is not None:
         lines += ["", "### On and standby", ""]
-        if report.standby is None:
+        if standby is None:
             lines.append(
                 "The connection was lost in standby, so no state could be read."
             )
-        elif changes := diff(report.on, report.standby):
+        elif changes := diff(report.on, standby):
             lines += ["| Message | Field | On | Standby |", "| --- | --- | --- | --- |"]
             lines += [
                 f"| `{msg}` | `{key}` | `{old!r}` | `{new!r}` |"
@@ -225,8 +237,9 @@ def render(report: Report, *, redacted: bool = True) -> str:
         else:
             lines.append("No field changed between on and standby.")
 
-    if report.power_answers:
+    if report.transitions or report.power_answers:
         lines += ["", "### Power", ""]
+        lines += [f"- {step}: {result}" for step, result in report.transitions]
         lines += [
             f"- {question} **{answer}**"
             for question, answer in report.power_answers.items()
@@ -241,7 +254,12 @@ def render(report: Report, *, redacted: bool = True) -> str:
             for when, event, data in report.timeline
         ]
 
-    states = {"current": report.snapshot, "on": report.on, "standby": report.standby}
+    states = {
+        "current": report.snapshot,
+        "standby with the remote": report.standby_remote,
+        "on": report.on,
+        "standby": report.standby,
+    }
     lines += ["", "<details><summary>Full state</summary>", "", "```text"]
     for name, snapshot in states.items():
         if snapshot is not None:
@@ -306,31 +324,69 @@ async def gather(
         if not guided:
             return report
 
-        await ask(
-            "Turn the device on (for example by turning the TV on), then press Enter."
+        async def transition(
+            step: str, power_on: bool, prompt: str | None = None
+        ) -> Snapshot | None:
+            """Wait for a power change, by the user or a command, and record it."""
+            mark = len(timeline)
+            if prompt is None:
+                note(f"sent set_power({power_on})")
+                await client.set_power(power_on)
+                await asyncio.sleep(power_wait)
+            elif (await ask(prompt)).lower() == "s":
+                report.transitions.append((step, TRANSITION_SKIPPED))
+                return None
+            else:
+                note(f"user: {step.lower()}")
+            pushed = any(
+                event == f"`{MSG_SPK_LIST_VIEW_INFO}`"
+                and isinstance(data, dict)
+                and data.get("b_powerstatus") is power_on
+                for _, event, data in timeline[mark:]
+            )
+            snapshot = await _collect_or_none(client)
+            if pushed:
+                result = TRANSITION_PUSHED
+            elif snapshot is None:
+                result = TRANSITION_LOST
+            elif (
+                _data(snapshot, MSG_SPK_LIST_VIEW_INFO).get("b_powerstatus") is power_on
+            ):
+                result = TRANSITION_ASKED
+            else:
+                result = TRANSITION_NOT_REPORTED
+            report.transitions.append((step, result))
+            return snapshot
+
+        skip = " Type s then Enter to skip this step."
+        report.standby_remote = await transition(
+            "Standby with the remote",
+            False,
+            "Put the device in standby with its remote (or its own button), wait"
+            " until it is in standby, then press Enter." + skip,
         )
-        note("user: device on")
-        report.on = await _collect_or_none(client)
+        report.on = await transition(
+            "On with the remote",
+            True,
+            "Turn the device on with its remote (or its own button), wait until it"
+            " is on, then press Enter." + skip,
+        )
 
         if try_power and report.on is not None:
-            note("sent set_power(False)")
-            await client.set_power(False)
-            await asyncio.sleep(power_wait)
+            await transition("`set_power(False)`", False)
             question = "Did `set_power(False)` put it in standby?"
             report.power_answers[question] = await _yes_no(ask, question)
-            note("sent set_power(True)")
-            await client.set_power(True)
-            await asyncio.sleep(power_wait)
+            await transition("`set_power(True)`", True)
             question = "Did `set_power(True)` turn it back on?"
             report.power_answers[question] = await _yes_no(ask, question)
             await ask("Make sure it is on again, then press Enter.")
 
-        await ask(
-            "Put the device in standby the way you usually do (TV off, remote),"
-            " wait 30 seconds, then press Enter."
+        report.standby = await transition(
+            "Standby the usual way",
+            False,
+            "Put the device in standby the way you usually do (TV off, for"
+            " example), wait 30 seconds, then press Enter." + skip,
         )
-        note("user: device in standby")
-        report.standby = await _collect_or_none(client)
         if report.standby is not None:
             # Some models are said to wake up when asked for their state in standby
             note("asked for the state in standby")
