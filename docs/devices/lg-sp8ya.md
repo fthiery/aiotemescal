@@ -24,6 +24,9 @@ What was learned on one SP8YA. It may or may not apply to other models.
 - It answers TCP keepalive probes and keeps an idle connection open without
   any application traffic (tested for 3 minutes), which is what
   [power loss detection](../../README.md#power-loss-detection) relies on.
+- Its Wi-Fi link loses a packet now and then: about one ping in 10 to 30
+  failed while the device was fine. With two keepalive probes, a short gap was
+  enough to close a healthy connection, which is why the client allows five.
 
 ## Inputs and sound modes
 
@@ -88,15 +91,30 @@ unprompted, followed by `SPK_LIST_VIEW_INFO` and `PLAY_INFO`:
 The client therefore reports `reports_power` as `False` for it, and never
 checks it when it is silent (see the README, "Silent devices").
 
-Whether asking for its state wakes it depends on how it went to standby:
+Any request turns it on when it is in network standby, whichever way it went
+there. On 2026-11-21, a connection was opened without sending anything, which
+did not wake it, then a single `SPK_LIST_VIEW_INFO` was sent:
 
-- after going to standby by itself when the TV was turned off, it was asked
-  several times on 2026-11-08 and stayed in standby;
-- after being put in standby with its remote, on 2026-11-21, any request
-  turned it on, on its optical input: each of `PRODUCT_INFO`,
-  `UPDATE_VIEW_INFO`, `EQ_VIEW_INFO`, `SETTING_VIEW_INFO`, `PLAY_INFO`,
-  `FUNC_VIEW_INFO` and `SPK_LIST_VIEW_INFO` was tried alone. Opening the
-  connection without sending anything did not.
+- after being put in standby with its remote, the request turned it on, on its
+  optical input. Each of `PRODUCT_INFO`, `UPDATE_VIEW_INFO`, `EQ_VIEW_INFO`,
+  `SETTING_VIEW_INFO`, `PLAY_INFO`, `FUNC_VIEW_INFO` and `SPK_LIST_VIEW_INFO`
+  was also tried alone, with the same result;
+- after going to standby by itself when the TV was turned off, the request
+  turned it on too.
+
+On 2026-11-08 it had stayed in standby when asked after the TV was turned off,
+but its internet access was blocked that day (see
+[Internet access](#internet-access)), which may explain the difference.
+
+When its power comes back (smart plug turned on), it starts on, before any
+request, so the client does not wake it in that case.
+
+Since the client asks for the whole state on every connection, a reconnection
+while it is in standby turns it on: after its [daily restart](#daily-restart),
+at night, or after a Wi-Fi loss. Skipping the requests while it is known to be
+off is not possible, since it does not report its power state, and no message
+is safe to send. Whether it then goes back to standby by itself without the TV
+has not been checked.
 
 Turning it off or on with the remote is not reported at all: no message is
 sent, and its state is the same when asked. Only the changes that follow the
