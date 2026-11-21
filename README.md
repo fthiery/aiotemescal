@@ -47,6 +47,7 @@ Features:
   - [Test against your device](#test-against-your-device)
 - [Future work](#future-work)
   - [Devices without power control](#devices-without-power-control)
+  - [Waking devices in standby](#waking-devices-in-standby)
   - [Devices that go silent after a manual shutdown](#devices-that-go-silent-after-a-manual-shutdown)
   - [Unknown inputs and sound modes](#unknown-inputs-and-sound-modes)
   - [Support for more models](#support-for-more-models)
@@ -140,10 +141,12 @@ Devices in standby and devices that do not report their power state are never
 asked, so this does not apply to the SP8YA. The LG S95Q was reported to behave
 this way (see its [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md)).
 
-Asking a device in standby for its state is safe on the models tested so far:
-neither the SP8YA nor the S95Q wakes up, which the guided report checks. The
-client therefore asks for the whole state on every connection, including while
-the device is in standby.
+Asking a device in standby for its state is not always safe. The S95Q stays
+in standby, but the SP8YA wakes up when it receives a request after being put
+in standby with its remote (opening the connection alone does not wake it).
+The client asks for the whole state on every connection, so it can wake such a
+device, for example after its daily restart (see [Waking devices in
+standby](#waking-devices-in-standby)). The guided report checks it.
 
 ## Debugging
 
@@ -314,6 +317,18 @@ whether it did anything. This needs to be handled:
 
 Reports from other models (see [Contributing](#contributing)) are needed to
 know which models are affected and which fields can be trusted.
+
+### Waking devices in standby
+
+The SP8YA wakes up, on its optical input, when it receives a request while in
+standby after being put there with its remote; it did not on 2026-11-08 after
+going to standby by itself when the TV was turned off. The client asks for the
+whole state on every connection, including reconnections, for example after
+the daily restart of the device or when its power comes back, which can turn
+it on at night. Skipping the requests while the device is known to be off does
+not help here, since the SP8YA does not report its power state. Next steps:
+find which requests wake it (maybe only some of the state messages), and avoid
+sending those on reconnection.
 
 ### Devices that go silent after a manual shutdown
 
