@@ -42,8 +42,10 @@ _LOGGER = logging.getLogger(__package__)
 MAX_BODY_SIZE = 1 << 20
 
 # A device that loses power stops acknowledging, so the kernel detects it without
-# any application traffic: idle connections after 5 + 2 * 1 s of keepalive probes,
-# and connections with unacknowledged data (a command just sent) after 3 s
+# any application traffic: idle connections after 5 + 5 * 1 s of keepalive probes,
+# and connections with unacknowledged data (a command just sent) after 4 s. Five
+# probes, not fewer, so that a Wi-Fi link losing a packet now and then does not
+# close a healthy connection; 4 s stays below the 5 s wait for an acknowledgement
 if sys.platform == "linux":
     import fcntl
     import termios
@@ -54,8 +56,8 @@ _ACK_POLL_INTERVAL = 0.01
 _TCP_OPTIONS = (
     ("TCP_KEEPIDLE", 5),
     ("TCP_KEEPINTVL", 1),
-    ("TCP_KEEPCNT", 2),
-    ("TCP_USER_TIMEOUT", 3000),
+    ("TCP_KEEPCNT", 5),
+    ("TCP_USER_TIMEOUT", 4000),
 )
 
 type MessageCallback = Callable[[dict[str, Any]], None]

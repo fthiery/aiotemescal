@@ -102,8 +102,11 @@ list the cases observed on each model.
 
 A device that loses power stops acknowledging TCP packets. The client
 configures the socket so that the kernel closes such a connection after about
-7 s when idle (keepalive probes after 5 s of silence, every second, two
-missed), or 3 s after a command that is not acknowledged.
+10 s when idle (keepalive probes after 5 s of silence, every second, five
+missed), or 4 s after a command that is not acknowledged. Five probes rather
+than fewer, because Wi-Fi links lose a packet now and then: on the SP8YA, about
+one ping in 10 to 30 failed while the device was fine, and with two probes a
+short gap was enough to close a healthy connection.
 
 Commands wait for the device to acknowledge them at the TCP level before
 returning, which takes a few milliseconds on a local network. A command sent to
