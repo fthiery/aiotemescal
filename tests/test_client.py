@@ -246,8 +246,8 @@ async def test_tcp_options(client: TemescalClient) -> None:
     assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE)
     assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == 5
     assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == 1
-    assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == 2
-    assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 3000
+    assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == 5
+    assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 4000
 
 
 async def test_reconnect_now_skips_the_backoff() -> None:
