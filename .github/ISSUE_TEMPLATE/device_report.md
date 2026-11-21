@@ -22,8 +22,9 @@ labels: device report
 <!--
 Paste the output of:
 
-    uvx aiotemescal report <address of the device> --guided
+    uvx aiotemescal report <address of the device>
 
-Add --try-power if you can check at the device whether it turns off and on.
+Run it at the device, with its remote at hand: it asks you to turn the device
+off and on, and to say what its display shows.
 Read it before posting: addresses and names are redacted, but check anyway.
 -->

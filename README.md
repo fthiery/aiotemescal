@@ -153,29 +153,28 @@ works.
 ### Report your device
 
 With [uv](https://docs.astral.sh/uv/), from a machine on the same network as
-the device, with the LG app closed (it queries the device and interferes with
-the report):
+the device, at the device with its remote at hand, and with the LG app closed
+(it queries the device and interferes with the report):
 
 ```
-uvx aiotemescal report 192.168.1.15                         # read-only
-uvx aiotemescal report 192.168.1.15 --guided                # asks you to put it in standby and on
-uvx aiotemescal report 192.168.1.15 --guided --try-power    # also tries the power commands
-uvx aiotemescal report 192.168.1.15 --guided --name-modes   # also asks the names of unknown sound modes
+uvx aiotemescal report 192.168.1.15
 ```
 
-- Without options, it only reads the state: what the device reports, the inputs
-  and sound modes it offers, and the messages it does not answer.
-- `--guided` asks you to put the device in standby and on, with its remote,
-  then in standby the way you usually do. It records how each change is
-  reported, compares the state on and in standby, and asks whether reading the
-  state woke the device.
-- `--try-power` also sends the power commands and asks whether they worked.
-- `--name-modes` selects each sound mode that has no name yet, asks which name
-  the display shows, then restores the current mode.
+The report always does every step, so that reports can be compared:
 
-Only `--try-power` and `--name-modes` change the device. Addresses, UUIDs and
-names are replaced with `<redacted>` (`--no-redact` keeps them); `-o FILE`
-writes the Markdown report to a file. Behaviours that only show up over time
+- it reads the state: what the device reports, the inputs and sound modes it
+  offers, and the messages it does not answer;
+- it asks you to put the device in standby and on with its remote, then in
+  standby the way you usually do, records how each change is reported,
+  compares the state on and in standby, and asks whether reading the state
+  woke the device;
+- it sends the power commands and asks whether they worked;
+- it selects each sound mode that has no name yet, asks which name the display
+  shows, then restores the current mode.
+
+A step you cannot do, for example without a remote, can be skipped when asked.
+Addresses, UUIDs and names are replaced with `<redacted>` (`--no-redact` keeps
+them); `-o FILE` writes the Markdown report to a file. Behaviours that only show up over time
 are not caught by the report: watch the device with `uvx aiotemescal HOST -v`
 for a while and paste the relevant part.
 
@@ -223,8 +222,8 @@ after the device reports turning off, and reconnect if it does not answer.
 ### Unknown inputs and sound modes
 
 The input and sound mode tables come from python-temescal. Indices reported by
-newer models need names in `const.py`; the report lists them and
-`--name-modes` asks for their names.
+newer models need names in `const.py`; the report lists them and asks for
+their names.
 
 ### Support for more models
 

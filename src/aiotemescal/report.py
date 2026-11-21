@@ -1,7 +1,8 @@
 """Collect what a device reports, to help support new models.
 
-Run ``aiotemescal report HOST`` and paste the output into an issue. Nothing
-that changes the device is sent unless ``--try-power`` is given.
+Run ``aiotemescal report HOST`` at the device and paste the output into an
+issue. It asks you to turn the device off and on, sends the power commands, and
+selects each sound mode without a name before restoring the current one.
 """
 
 import argparse
@@ -128,8 +129,8 @@ def analyse(snapshot: Snapshot) -> list[str]:
         findings.append("Power state: reported (`b_powerstatus`)")
     else:
         findings.append(
-            "Power state: not reported (no `b_powerstatus`), run with --guided to"
-            " find out which fields change between on and standby"
+            "Power state: not reported (no `b_powerstatus`), see which fields"
+            " change between on and standby"
         )
     findings.append(
         "Unique id: "
@@ -311,14 +312,11 @@ async def _collect_or_none(client: TemescalClient) -> Snapshot | None:
 async def gather(
     client: TemescalClient,
     *,
-    guided: bool = False,
-    try_power: bool = False,
-    name_modes: bool = False,
     ask: Ask = _ask,
     power_wait: float = POWER_WAIT,
     mode_wait: float = MODE_WAIT,
 ) -> Report:
-    """Collect a report from a connected client, asking the user when guided."""
+    """Collect a full report from a connected client, asking the user along the way."""
     start = time.monotonic()
     timeline: list[tuple[float, str, Any]] = []
 
@@ -338,11 +336,13 @@ async def gather(
         client.subscribe_connection(on_connection),
     )
 
-    async def name_unknown_modes(snapshot: Snapshot) -> None:
+    async def name_unknown_modes(snapshot: Snapshot, *, is_on: bool) -> None:
         """Select each sound mode without a name, ask for its name, then restore."""
         eq = _data(snapshot, MSG_EQ_VIEW_INFO)
         unknown = [i for i in eq.get("ai_eq_list") or [] if i >= len(equalisers)]
         original = eq.get("i_curr_eq")
+        if unknown and not is_on:
+            await ask("Make sure the device is on, then press Enter.")
         try:
             for index in unknown:
                 note(f"sent set_eq({index})")
@@ -360,11 +360,6 @@ async def gather(
 
     try:
         report = Report(snapshot=await collect(client), timeline=timeline)
-        if not guided:
-            if name_modes:
-                await ask("Make sure the device is on, then press Enter.")
-                await name_unknown_modes(report.snapshot)
-            return report
 
         async def transition(
             step: str, power_on: bool, prompt: str | None = None, *, read: bool = True
@@ -444,12 +439,11 @@ async def gather(
             " on, then press Enter." + skip,
         )
 
-        if name_modes:
-            if report.on is None:
-                await ask("Make sure the device is on, then press Enter.")
-            await name_unknown_modes(report.on or report.snapshot)
+        await name_unknown_modes(
+            report.on or report.snapshot, is_on=report.on is not None
+        )
 
-        if try_power and report.on is not None:
+        if report.on is not None:
             # Asked before reading the state, which can wake a device in standby
             await transition("`set_power(False)`", False, read=False)
             question = "Did `set_power(False)` put it in standby?"
@@ -488,12 +482,7 @@ async def gather(
 async def _run(args: argparse.Namespace) -> str:
     client = TemescalClient(args.host, args.port, response_timeout=RESPONSE_TIMEOUT)
     async with client:
-        report = await gather(
-            client,
-            guided=args.guided,
-            try_power=args.try_power,
-            name_modes=args.name_modes,
-        )
+        report = await gather(client)
     return render(report, redacted=not args.no_redact)
 
 
@@ -503,36 +492,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("host")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument(
-        "--guided",
-        action="store_true",
-        help="ask you to turn the device on and off, and compare its state",
-    )
-    parser.add_argument(
-        "--try-power",
-        action="store_true",
-        help="with --guided, send the power commands and ask whether they worked",
-    )
-    parser.add_argument(
         "--no-redact", action="store_true", help="keep addresses, identifiers and names"
-    )
-    parser.add_argument(
-        "--name-modes",
-        action="store_true",
-        help="select each sound mode without a name and ask you for its name",
     )
     parser.add_argument("-o", "--output", help="write the report to this file")
     args = parser.parse_args(argv)
-    if args.try_power and not args.guided:
-        parser.error("--try-power needs --guided")
-    if args.name_modes:
-        sys.stderr.write(
-            "--name-modes selects each sound mode without a name, then restores"
-            " the current one.\n"
-        )
-    if args.try_power:
-        sys.stderr.write(
-            "--try-power sends the power commands, which turn the device off and on.\n"
-        )
+    sys.stderr.write(
+        "Run the report at the device, with its remote at hand: it asks you to turn"
+        " the device off and on, sends the power commands, and selects each sound"
+        " mode without a name before restoring the current one.\n"
+    )
     sys.stderr.write(
         "Keep the LG app closed during the report: it queries the device, which"
         " interferes with what the report observes.\n"

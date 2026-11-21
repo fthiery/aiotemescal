@@ -2,7 +2,7 @@
 
 <!--
 Copy this file to docs/devices/lg-<model>.md (lower case) and fill it from
-`aiotemescal report HOST --guided`. Write down what you observed, with dates
+`aiotemescal report HOST`. Write down what you observed, with dates
 and numbers where you have them, and say when something is a guess. Remove the
 sections you have nothing for.
 -->
@@ -28,7 +28,7 @@ What was learned on one <model>. It may or may not apply to other models.
 
 Offered inputs and sound modes from the report, and any index reported as
 "without a name in aiotemescal", with the name the display of the device shows
-for it (`--name-modes` asks for it).
+for it (the report asks for it).
 
 ## Disconnections
 
@@ -38,7 +38,7 @@ standby without network, internet access needed…
 ## Power
 
 - Whether `b_powerstatus` is reported.
-- Whether `set_power()` works (`--try-power`).
+- Whether `set_power()` works (the report tries it).
 - Which fields change between on and standby (the "On and standby" table of the
   report), and the power draw in each state if you can measure it.
 
