@@ -36,6 +36,8 @@ Features:
 - [Usage](#usage)
 - [Reconnection](#reconnection)
 - [Power loss detection](#power-loss-detection)
+- [Power state](#power-state)
+  - [Silent devices](#silent-devices)
 - [Debugging](#debugging)
 - [Tests](#tests)
 - [Tested devices](#tested-devices)
@@ -45,6 +47,7 @@ Features:
   - [Test against your device](#test-against-your-device)
 - [Future work](#future-work)
   - [Devices without power control](#devices-without-power-control)
+  - [Devices that go silent after a manual shutdown](#devices-that-go-silent-after-a-manual-shutdown)
   - [Unknown inputs and sound modes](#unknown-inputs-and-sound-modes)
   - [Support for more models](#support-for-more-models)
   - [Power loss detection outside Linux](#power-loss-detection-outside-linux)
@@ -110,10 +113,37 @@ the connection is closed, instead of returning as if it had been delivered.
 **This relies on Linux socket options.** Each option is only set when Python
 exposes it on the running system, and `TCP_USER_TIMEOUT` only exists on Linux.
 Where an option is missing, the default of the operating system applies, which
-is often two hours of silence before the first keepalive probe. Since the client
-sends no application-level heartbeat, a device that loses power while the
-connection is idle can then go unnoticed for that long. Home Assistant OS and
-other Linux hosts are not affected.
+is often two hours of silence before the first keepalive probe. Apart from the
+check of [silent devices that are on](#silent-devices), the client sends no
+application-level heartbeat, so a device that loses power while the connection
+is idle can then go unnoticed for that long. Home Assistant OS and other Linux
+hosts are not affected.
+
+## Power state
+
+`power_on` is the last power state the device reported (`b_powerstatus`), or
+`None` while it is unknown. `reports_power` tells whether the device reports it
+at all: `None` until the first answer to `SPK_LIST_VIEW_INFO`, then `False` if
+that answer had no `b_powerstatus`, and `True` as soon as one is seen. Devices
+that never report it, like the SP8YA, also ignore `set_power()` (see
+[Devices without power control](#devices-without-power-control)), so an
+application can hide its power control when `reports_power` is `False`.
+
+### Silent devices
+
+Some devices stop sending updates without closing the connection, while still
+acknowledging at the TCP level, which keepalive cannot notice. When a device
+that reported being on has sent nothing for `idle_timeout` seconds (30 by
+default), the client asks it for `SPK_LIST_VIEW_INFO`. If no answer arrives,
+the connection is closed and opened again, which requests the whole state.
+Devices in standby and devices that do not report their power state are never
+asked, so this does not apply to the SP8YA. The LG S95Q was reported to behave
+this way (see its [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md)).
+
+Asking a device in standby for its state is safe on the models tested so far:
+neither the SP8YA nor the S95Q wakes up, which the guided report checks. The
+client therefore asks for the whole state on every connection, including while
+the device is in standby.
 
 ## Debugging
 
@@ -140,6 +170,7 @@ make test-power-cycle TEMESCAL_HOST=192.168.1.127  # asks you to unplug and repl
 | Model | Firmware (main / micom / Chromecast) | Notes |
 | --- | --- | --- |
 | LG SP8YA | 2407090 / 2207202 / 1.56.310669 | [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md) |
+| LG S95Q (S95QR) | 2603241 / 2501151 / 1.56.310669 | [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md) |
 
 Models that worked with python-temescal are expected to work too; this table
 only lists the ones tested with aiotemescal itself. The versions are those
@@ -175,8 +206,9 @@ uvx aiotemescal report 192.168.1.15 --guided --try-power    # also tries the pow
   offers, and the messages it does not answer.
 - `--guided` asks you to turn the device on, then to put it in standby the way
   you usually do (TV off, remote), and compares its full state in both cases.
-  It also records every message the device sends by itself in the meantime.
-  This shows whether, and how, its power state can be followed.
+  It also records every message the device sends by itself in the meantime,
+  and asks whether asking for the state in standby woke the device up. This
+  shows whether, and how, its power state can be followed.
 - `--try-power` also sends the power commands, which turn the device off and
   on, and asks you whether they worked. It is the only option that changes the
   device.
@@ -256,21 +288,32 @@ The client currently sends the command anyway, and an application cannot tell
 whether it did anything. This needs to be handled:
 
 - tell whether a device supports power control, so that applications can hide
-  their power button. Whether it reports `b_powerstatus` is a likely sign,
-  since none of the models above does, but the DSP11RA shows that support can
-  also be partial;
+  their power button. `reports_power` is a first step, since none of the models
+  above reports `b_powerstatus`, but the DSP11RA shows that support can also
+  be partial;
 - where it is reliable, follow the power state from other fields, such as
   `b_connect` on the SP8YA (only confirmed with the TV as the source so far).
 
 Reports from other models (see [Contributing](#contributing)) are needed to
 know which models are affected and which fields can be trusted.
 
+### Devices that go silent after a manual shutdown
+
+On the S95Q, the connection sometimes stops delivering updates after the
+device is turned off by hand, while the socket still looks open, so the next
+power-on is never reported. The check of [silent devices](#silent-devices)
+only covers devices that are on, so it misses this case. A possible fix is to
+ask the device for its state a few seconds after it reports turning off, and
+to reconnect if it does not answer, without reporting the device as
+unavailable when the reconnection succeeds right away.
+
 ### Unknown inputs and sound modes
 
 The input and sound mode tables come from python-temescal and stop at the
 models it knew. The [SP8YA](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md#inputs-and-sound-modes)
-offers sound mode 23, which has no name yet; applications show it as unknown.
-Its name has to be found, for example as shown in the LG app, and added to
+offers sound mode 23 and the [S95Q](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md#inputs-and-sound-modes)
+sound modes 23 to 26, which have no name yet; applications show them as
+unknown. Their names have to be found, for example as shown in the LG app, and added to
 `equalisers` in `const.py`, along with any index reported by other models.
 The report lists these indices under "without a name in aiotemescal".
 

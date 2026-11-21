@@ -47,6 +47,7 @@ async def test_request(soundbar: FakeSoundbar, client: TemescalClient) -> None:
     answer = await client.request("SPK_LIST_VIEW_INFO")
 
     assert answer == {
+        "cmd": "notibyget",
         "msg": "SPK_LIST_VIEW_INFO",
         "data": {"s_user_name": "Salon", "i_vol": 7},
     }
@@ -430,3 +431,132 @@ async def test_idle_socket_has_nothing_unacknowledged(
     assert client._writer is not None
 
     assert _unacknowledged(client._writer.get_extra_info("socket")) == 0
+
+
+@pytest.mark.parametrize(
+    ("answer", "reports_power", "power_on"),
+    [
+        pytest.param({"i_vol": 7}, False, None, id="not_reported"),
+        pytest.param({"i_vol": 7, "b_powerstatus": True}, True, True, id="on"),
+        pytest.param({"i_vol": 7, "b_powerstatus": False}, True, False, id="off"),
+    ],
+)
+async def test_power_state_from_the_state_answer(
+    soundbar: FakeSoundbar,
+    answer: dict[str, Any],
+    reports_power: bool,
+    power_on: bool | None,
+) -> None:
+    """Whether the device reports its power state is learned on connection."""
+    soundbar.answers["SPK_LIST_VIEW_INFO"] = answer
+    client = TemescalClient("127.0.0.1", soundbar.port, **FAST)
+    assert client.reports_power is None
+
+    await client.start()
+    await wait_for(lambda: client.connected)
+
+    assert client.reports_power is reports_power
+    assert client.power_on is power_on
+    await client.stop()
+
+
+async def test_power_state_from_updates(
+    soundbar: FakeSoundbar, client: TemescalClient
+) -> None:
+    """Pushed updates change the power state; partial ones do not reset it."""
+    seen: list[bool | None] = []
+    client.subscribe(lambda message: seen.append(client.power_on))
+
+    await soundbar.push(
+        {
+            "cmd": "notibyset",
+            "msg": "SPK_LIST_VIEW_INFO",
+            "data": {"b_powerstatus": True},
+        }
+    )
+    await soundbar.push(
+        {"cmd": "notibyset", "msg": "SPK_LIST_VIEW_INFO", "data": {"i_vol": 3}}
+    )
+    await wait_for(lambda: len(seen) == 2)
+
+    assert seen == [True, True]
+    assert client.reports_power is True
+
+
+async def test_set_host_forgets_the_power_state(
+    soundbar: FakeSoundbar, client: TemescalClient
+) -> None:
+    await soundbar.push(
+        {
+            "cmd": "notibyset",
+            "msg": "SPK_LIST_VIEW_INFO",
+            "data": {"b_powerstatus": True},
+        }
+    )
+    await wait_for(lambda: client.power_on is True)
+
+    client.set_host("127.0.0.1")
+
+    assert client.power_on is None
+    assert client.reports_power is None
+
+
+async def _silent_client(
+    soundbar: FakeSoundbar, power: dict[str, Any]
+) -> TemescalClient:
+    """Return a connected client whose device then goes silent."""
+    soundbar.answers["SPK_LIST_VIEW_INFO"] = {"i_vol": 7, **power}
+    client = TemescalClient("127.0.0.1", soundbar.port, **FAST, idle_timeout=0.3)
+    await client.start()
+    await wait_for(lambda: client.connected)
+    while not soundbar.received.empty():
+        soundbar.received.get_nowait()
+    return client
+
+
+async def test_silent_device_that_is_on_is_checked(soundbar: FakeSoundbar) -> None:
+    """A device that is on and silent is asked for its state, and stays connected."""
+    client = await _silent_client(soundbar, {"b_powerstatus": True})
+    changes: list[bool] = []
+    client.subscribe_connection(changes.append)
+
+    message = await asyncio.wait_for(soundbar.received.get(), 2)
+
+    assert message == {"cmd": "get", "msg": "SPK_LIST_VIEW_INFO"}
+    assert changes == []
+    assert client.connected
+    await client.stop()
+
+
+async def test_stalled_device_that_is_on_is_reconnected(soundbar: FakeSoundbar) -> None:
+    """A device that is on but no longer answers is reconnected to."""
+    client = await _silent_client(soundbar, {"b_powerstatus": True})
+    changes: list[bool] = []
+    client.subscribe_connection(changes.append)
+    soundbar.responsive = False
+
+    await wait_for(lambda: changes == [False], timeout=3)
+    soundbar.responsive = True
+    await wait_for(lambda: changes == [False, True], timeout=3)
+
+    await client.stop()
+
+
+@pytest.mark.parametrize(
+    "power",
+    [
+        pytest.param({}, id="not_reported"),
+        pytest.param({"b_powerstatus": False}, id="standby"),
+    ],
+)
+async def test_silent_device_not_on_is_left_alone(
+    soundbar: FakeSoundbar, power: dict[str, Any]
+) -> None:
+    """Devices in standby or that do not report their power state are not polled."""
+    client = await _silent_client(soundbar, power)
+
+    await asyncio.sleep(1)
+
+    assert soundbar.received.empty()
+    assert client.connected
+    await client.stop()

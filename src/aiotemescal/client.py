@@ -90,6 +90,7 @@ class TemescalClient:
         connect_timeout: float = 5.0,
         min_backoff: float = 1.0,
         max_backoff: float = 5.0,
+        idle_timeout: float = 30.0,
     ) -> None:
         """Initialize the client; no I/O happens until start or connect."""
         self.host = host
@@ -98,6 +99,7 @@ class TemescalClient:
         self._connect_timeout = connect_timeout
         self._min_backoff = min_backoff
         self._max_backoff = max_backoff
+        self._idle_timeout = idle_timeout
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._ready = False
@@ -106,6 +108,22 @@ class TemescalClient:
         self._pending: dict[str, list[asyncio.Future[dict[str, Any]]]] = {}
         self._message_callbacks: list[MessageCallback] = []
         self._connection_callbacks: list[ConnectionCallback] = []
+        self._power_on: bool | None = None
+        self._reports_power: bool | None = None
+        self._last_received = 0.0
+
+    @property
+    def power_on(self) -> bool | None:
+        """Return the last power state the device reported, None if unknown."""
+        return self._power_on
+
+    @property
+    def reports_power(self) -> bool | None:
+        """Return whether the device reports its power state, None until known.
+
+        Devices that never report it, like the SP8YA, also ignore set_power().
+        """
+        return self._reports_power
 
     @property
     def connected(self) -> bool:
@@ -135,6 +153,7 @@ class TemescalClient:
     def set_host(self, host: str) -> None:
         """Change the address of the device and connect to it right away."""
         self.host = host
+        self._power_on = self._reports_power = None
         self.reconnect_now()
 
     async def connect(self) -> None:
@@ -246,17 +265,24 @@ class TemescalClient:
                     backoff = min(backoff * 2, self._max_backoff)
                 continue
             backoff = self._min_backoff
-            refresh = asyncio.create_task(
-                self._refresh(), name=f"aiotemescal {self.host} refresh"
-            )
+            self._last_received = asyncio.get_running_loop().time()
+            tasks = [
+                asyncio.create_task(
+                    self._refresh(), name=f"aiotemescal {self.host} refresh"
+                ),
+                asyncio.create_task(
+                    self._watch_idle(), name=f"aiotemescal {self.host} idle"
+                ),
+            ]
             try:
                 await self._read_frames()
             except _SESSION_ERRORS as err:
                 _LOGGER.debug("%s: connection lost: %r", self.host, err)
             finally:
-                refresh.cancel()
+                for task in tasks:
+                    task.cancel()
                 self._close()
-                await asyncio.wait([refresh])
+                await asyncio.wait(tasks)
             await self._wait(backoff)
 
     async def _refresh(self) -> None:
@@ -269,6 +295,36 @@ class TemescalClient:
             *(self.request(msg) for msg in STATE_MESSAGES), return_exceptions=True
         )
         self._set_ready()
+
+    async def _watch_idle(self) -> None:
+        """Check a silent device that is on, and reconnect if it does not answer.
+
+        Some models (S95Q) stop sending updates without closing the connection,
+        which TCP keepalive cannot notice since the device still acknowledges.
+        Only devices that report being on are checked: devices in standby and
+        devices that do not report their power state (SP8YA) are left alone.
+        """
+        loop = asyncio.get_running_loop()
+        while True:
+            await asyncio.sleep(
+                max(self._last_received + self._idle_timeout - loop.time(), 0)
+            )
+            if loop.time() - self._last_received < self._idle_timeout:
+                continue
+            if self._power_on is not True:
+                self._last_received = loop.time()
+                continue
+            _LOGGER.debug(
+                "%s: silent for %.0f s, checking", self.host, self._idle_timeout
+            )
+            try:
+                await self.request(MSG_SPK_LIST_VIEW_INFO)
+            except TemescalTimeoutError:
+                _LOGGER.debug("%s: no answer while on, reconnecting", self.host)
+                self._close()
+                return
+            except TemescalConnectionError:
+                return
 
     def _set_ready(self) -> None:
         self._ready = True
@@ -343,7 +399,20 @@ class TemescalClient:
                 _LOGGER.warning("%s: ignoring undecodable frame: %s", self.host, err)
                 continue
             _LOGGER.debug("%s: received %s", self.host, message)
+            self._last_received = asyncio.get_running_loop().time()
+            self._track_power(message)
             self._dispatch(message)
+
+    def _track_power(self, message: dict[str, Any]) -> None:
+        if message.get("msg") != MSG_SPK_LIST_VIEW_INFO:
+            return
+        data = message.get("data") or {}
+        if "b_powerstatus" in data:
+            self._power_on = bool(data["b_powerstatus"])
+            self._reports_power = True
+        elif message.get("cmd") == "notibyget" and self._reports_power is None:
+            # Only the answer to a request is complete; updates only carry changes
+            self._reports_power = False
 
     def _dispatch(self, message: dict[str, Any]) -> None:
         for future in self._pending.get(message.get("msg", ""), []):
