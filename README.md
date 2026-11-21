@@ -204,14 +204,27 @@ uvx aiotemescal report 192.168.1.15 --guided --try-power    # also tries the pow
 - Without options, the report only asks the device for its state: nothing is
   changed. It lists what the device reports, the inputs and sound modes it
   offers, and the messages it does not answer.
-- `--guided` asks you to turn the device on, then to put it in standby the way
-  you usually do (TV off, remote), and compares its full state in both cases.
-  It also records every message the device sends by itself in the meantime,
-  and asks whether asking for the state in standby woke the device up. This
-  shows whether, and how, its power state can be followed.
+- `--guided` asks you to put the device in standby with its remote, to turn it
+  on with its remote, then to put it in standby the way you usually do (TV
+  off, for example). Steps can be skipped, for example without a remote at
+  hand. For each power change, the report says whether the device sent
+  `b_powerstatus` by itself, only reported it when asked, or not at all, which
+  tells whether, and how, its power state can be followed. It also compares
+  its full state on and in standby, records every message the device sends by
+  itself, and asks whether asking for the state in standby woke it up.
 - `--try-power` also sends the power commands, which turn the device off and
   on, and asks you whether they worked. It is the only option that changes the
   device.
+
+Some behaviours only show up over time, or not every time: a device that stops
+sending updates while it is idle, or after being turned off by hand. The
+report runs for a few minutes on a single connection and cannot catch them.
+To look for them, watch the device with debug logs for a longer while, turning
+it on and off as you usually do, and paste the relevant part:
+
+```
+uvx aiotemescal 192.168.1.15 -v
+```
 
 The report is printed as Markdown, ready to paste (`-o FILE` writes it to a
 file). IP addresses, MAC addresses, UUIDs and the names you gave the device are
