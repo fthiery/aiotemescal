@@ -1,7 +1,7 @@
 """Tests for the device report."""
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -9,20 +9,18 @@ from aiotemescal import TemescalClient
 from aiotemescal.__main__ import main
 from aiotemescal.report import (
     REDACTED,
-    TRANSITION_ASKED,
-    TRANSITION_NOT_PUSHED,
-    TRANSITION_NOT_REPORTED,
-    TRANSITION_PUSHED,
-    TRANSITION_SKIPPED,
     REPORT_MESSAGES,
+    PowerTest,
     Report,
     Snapshot,
     analyse,
     collect,
     diff,
     gather,
+    power_detection,
     redact,
     render,
+    unanswered,
 )
 
 from .conftest import FakeSoundbar
@@ -110,6 +108,25 @@ def test_diff() -> None:
     ]
 
 
+def test_diff_ignores_noise() -> None:
+    """s_timezone holds fragments of other messages, so its changes mean nothing."""
+    on = {**ON, "C4A_SETTING_INFO": {"s_timezone": 'd{"msg": "UPDATE_VIEW_INFO"}'}}
+    standby = {**ON, "C4A_SETTING_INFO": {"s_timezone": "d"}}
+
+    assert diff(on, standby) == []
+
+
+def test_diff_ignores_unanswered_messages() -> None:
+    """A message unanswered in one state is not shown as changed fields."""
+    on = {**ON, "FUNC_VIEW_INFO": None, "SPK_LIST_VIEW_INFO": None}
+
+    assert diff(on, STANDBY) == []
+    assert unanswered(on, STANDBY) == [
+        "`FUNC_VIEW_INFO` (on)",
+        "`SPK_LIST_VIEW_INFO` (on)",
+    ]
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
@@ -142,22 +159,92 @@ def test_redact(value: object, expected: object) -> None:
     assert redact(value) == expected
 
 
+PUSHED_STANDBY = [("FUNC_VIEW_INFO", {"b_connect": False, "i_curr_func": 4})]
+PUSHED_ON = [("FUNC_VIEW_INFO", {"b_connect": True, "i_curr_func": 20})]
+
+
+@pytest.mark.parametrize(
+    ("test", "conclusion"),
+    [
+        pytest.param(
+            PowerTest(
+                on=ON,
+                standby=STANDBY,
+                woken_by_reading=True,
+                pushed={"standby": PUSHED_STANDBY, "on": PUSHED_ON},
+            ),
+            "can be followed from what the device sends by itself"
+            " (`b_connect`, `i_curr_func`)",
+            id="pushed",
+        ),
+        pytest.param(
+            PowerTest(
+                on=ON,
+                standby=STANDBY,
+                woken_by_reading=False,
+                pushed={"standby": PUSHED_STANDBY},
+            ),
+            "can be read by asking for",
+            id="asked",
+        ),
+        pytest.param(
+            PowerTest(on=ON, standby=STANDBY, woken_by_reading=True),
+            "cannot be followed: neither change is sent by itself, and reading the"
+            " state in standby turns it on",
+            id="woken",
+        ),
+        pytest.param(
+            PowerTest(
+                on=ON,
+                standby=STANDBY,
+                woken_by_reading=True,
+                pushed={"standby": [], "on": PUSHED_ON},
+            ),
+            "cannot be followed: only turning on is sent by itself",
+            id="only on pushed",
+        ),
+        pytest.param(
+            PowerTest(on=ON, standby=ON, woken_by_reading=False),
+            "no field differs between on and standby when asked",
+            id="nothing changes",
+        ),
+    ],
+)
+def test_power_detection(test: PowerTest, conclusion: str) -> None:
+    """The report concludes whether, and how, the power state can be followed."""
+    assert conclusion in power_detection(test)[-1]
+
+
+def test_power_detection_connection_lost() -> None:
+    """A device that leaves the network in standby is reported as such."""
+    text = render(Report(snapshot=ON, power={"TV": PowerTest(on=ON)}))
+
+    assert "The device could not be reached after a power change" in text
+
+
 def test_render_redacted() -> None:
     """The report has the findings and the on/standby table, without identifying data."""
     report = Report(
         snapshot=ON,
-        on=ON,
-        standby=STANDBY,
-        power_answers={"Did `set_power(False)` put it in standby?": "no"},
+        power={
+            "remote": PowerTest(
+                on=ON,
+                standby=STANDBY,
+                woken_by_reading=False,
+                pushed={"standby": [("FUNC_VIEW_INFO", {"s_spk_bt_name": "Salle TV"})]},
+            )
+        },
         timeline=[(1.5, "`FUNC_VIEW_INFO`", {"s_spk_bt_name": "Salle TV"})],
     )
 
     text = render(report)
 
     assert "- Model: SP8YA" in text
+    assert "### Power detection with the remote" in text
     assert "| `FUNC_VIEW_INFO` | `b_connect` | `True` | `False` |" in text
-    assert "Did `set_power(False)` put it in standby? **no**" in text
-    assert "# standby" in text
+    assert "Reading the state in standby turned it on: **no**" in text
+    assert '  - `FUNC_VIEW_INFO` `{"s_spk_bt_name": "<redacted>"}`' in text
+    assert "# standby with the remote" in text
     for value in IDENTIFYING:
         assert value not in text
 
@@ -167,100 +254,126 @@ def test_render_not_redacted() -> None:
     assert "192.168.1.127" in render(Report(snapshot=ON), redacted=False)
 
 
-def test_render_standby_lost() -> None:
-    """A device that leaves the network in standby is reported as such."""
-    text = render(Report(snapshot=ON, on=ON, standby=None))
-
-    assert "The connection was lost in standby" in text
-
-
-async def test_gather_guided(soundbar: FakeSoundbar) -> None:
-    """Each power change says whether the device reported it, and how."""
-    soundbar.answers["SPK_LIST_VIEW_INFO"] = {"b_powerstatus": True}
-    answers = iter(["", "y", "", "y", "n", "", "", "y"])
+async def test_gather(soundbar: FakeSoundbar) -> None:
+    """Each power change, with the remote then the TV, records what is sent by itself."""
+    soundbar.answers["FUNC_VIEW_INFO"] = dict(ON["FUNC_VIEW_INFO"] or {})
+    # Follows the TV, then for each way: ready, standby, still in standby, on
+    answers = iter(["y", "", "", "y", "", "", "", "y", ""])
 
     async def ask(prompt: str) -> str:
-        if "standby with its remote" in prompt:
-            # Reported by itself
-            soundbar.answers["SPK_LIST_VIEW_INFO"] = {"b_powerstatus": False}
-            await soundbar.push(
-                {
-                    "cmd": "notibyset",
-                    "msg": "SPK_LIST_VIEW_INFO",
-                    "data": {"b_powerstatus": False},
-                }
-            )
-            # The user presses Enter once the device has changed
+        # Only the changes that follow the TV are reported, as on the SP8YA
+        if prompt.startswith("Turn the TV off"):
+            new = {"b_connect": False, "i_curr_func": 4}
+        elif prompt.startswith("Turn the TV on, "):
+            new = {"b_connect": True, "i_curr_func": 20}
+        else:
+            return next(answers)
+        soundbar.answers["FUNC_VIEW_INFO"].update(new)
+        await soundbar.push({"cmd": "notibyset", "msg": "FUNC_VIEW_INFO", "data": new})
+        # The user presses Enter once the device has changed
+        await asyncio.sleep(0.1)
+        return next(answers)
+
+    async with TemescalClient(
+        "127.0.0.1", soundbar.port, response_timeout=0.2
+    ) as client:
+        report = await gather(client, ask=ask, power_wait=0, settle_wait=0)
+
+    assert list(report.power) == ["remote", "TV"]
+    assert report.power["remote"].pushed == {"standby": [], "on": []}
+    assert report.power["TV"].pushed == {
+        "standby": [("FUNC_VIEW_INFO", {"b_connect": False, "i_curr_func": 4})],
+        "on": [("FUNC_VIEW_INFO", {"b_connect": True, "i_curr_func": 20})],
+    }
+    assert report.power["TV"].woken_by_reading is False
+    assert "neither change" in power_detection(report.power["remote"])[-1]
+    assert "sends by itself" in power_detection(report.power["TV"])[-1]
+    # Nothing but requests is sent to a device whose sound modes all have a name
+    assert {m["cmd"] async for m in _drain(soundbar)} == {"get"}
+
+
+async def test_gather_without_tv(soundbar: FakeSoundbar) -> None:
+    """A device that does not follow a TV is only tested with its remote."""
+    answers = iter(["n", "", "", "y", ""])
+
+    async def ask(prompt: str) -> str:
+        return next(answers)
+
+    async with TemescalClient(
+        "127.0.0.1", soundbar.port, response_timeout=0.2
+    ) as client:
+        report = await gather(client, ask=ask, power_wait=0, settle_wait=0)
+
+    assert list(report.power) == ["remote"]
+
+
+async def test_gather_reconnects(soundbar: FakeSoundbar) -> None:
+    """A connection lost during a power change is opened again before reading."""
+    answers = iter(["n", "", "", "y", ""])
+
+    async def ask(prompt: str) -> str:
+        if prompt.startswith("Turn the device on"):
+            # The device drops the connection, then accepts a new one
+            await soundbar.stop()
             await asyncio.sleep(0.1)
-        elif "on with its remote" in prompt:
-            # Only reported when asked
-            soundbar.answers["SPK_LIST_VIEW_INFO"] = {"b_powerstatus": True}
-        elif "the way you usually do" in prompt:
-            # Not reported at all, but another field changes
-            soundbar.answers["FUNC_VIEW_INFO"] = {"b_connect": False}
+            await soundbar.start()
+        return next(answers)
+
+    async with TemescalClient(
+        "127.0.0.1", soundbar.port, response_timeout=0.2
+    ) as client:
+        report = await gather(client, ask=ask, power_wait=0, settle_wait=0)
+
+    assert report.power["remote"].on is not None
+    # Dropped while the device was in standby, before it was turned on
+    assert report.power["remote"].lost == {"standby": 1}
+    assert "Connection lost: 1 time in standby" in render(report)
+    events = [event for _, event, _ in report.timeline]
+    assert events.index("connection lost") < events.index("connected")
+
+
+async def test_gather_unreachable(soundbar: FakeSoundbar) -> None:
+    """A device that does not come back is reported as unreachable, not waited for."""
+    answers = iter(["n", "", "", "y", ""])
+
+    async def ask(prompt: str) -> str:
+        if prompt.startswith("Turn the device on"):
+            await soundbar.stop()
         return next(answers)
 
     async with TemescalClient(
         "127.0.0.1", soundbar.port, response_timeout=0.2
     ) as client:
         report = await gather(
-            client, guided=True, try_power=True, ask=ask, power_wait=0
+            client, ask=ask, power_wait=0, settle_wait=0, reconnect_for=0
         )
 
-    assert report.transitions == [
-        ("Standby with the remote", TRANSITION_PUSHED),
-        ("On with the remote", TRANSITION_ASKED),
-        ("`set_power(False)`", TRANSITION_NOT_PUSHED),
-        ("`set_power(True)`", TRANSITION_NOT_PUSHED),
-        ("Standby the usual way", TRANSITION_NOT_REPORTED),
-    ]
-    assert list(report.power_answers.values()) == ["yes", "yes", "no", "yes"]
-    assert report.on is not None
-    assert report.standby is not None
-    assert diff(report.on, report.standby) == [
-        ("FUNC_VIEW_INFO", "b_connect", None, False)
-    ]
-    power = [m async for m in _drain(soundbar) if m.get("cmd") == "set"]
-    assert [m["data"] for m in power] == [{"b_powerkey": False}, {"b_powerkey": True}]
-    text = render(report)
-    assert f"- Standby with the remote: {TRANSITION_PUSHED}" in text
-    assert "# standby with the remote" in text
+    assert report.power["remote"].on is None
+    assert "could not reach the device" in [e for _, e, _ in report.timeline]
 
 
-async def test_gather_guided_steps_can_be_skipped(soundbar: FakeSoundbar) -> None:
-    """A device without a remote at hand can skip the remote steps."""
-    answers = iter(["s", "s", "", "y"])
+async def test_gather_device_woken_by_reading(soundbar: FakeSoundbar) -> None:
+    """A device woken by reading its state is put in standby again, not asked again."""
+    answers = iter(["n", "", "", "n", "", ""])
+    received_before_turning_on: list[dict[str, object]] = []
 
     async def ask(prompt: str) -> str:
+        if "standby again" in prompt:
+            # Forget the requests made so far, to see what follows
+            async for _ in _drain(soundbar):
+                pass
+        elif prompt.startswith("Turn the device on"):
+            received_before_turning_on.extend([m async for m in _drain(soundbar)])
         return next(answers)
 
     async with TemescalClient(
         "127.0.0.1", soundbar.port, response_timeout=0.2
     ) as client:
-        report = await gather(client, guided=True, ask=ask, power_wait=0)
+        report = await gather(client, ask=ask, power_wait=0, settle_wait=0)
 
-    assert report.transitions == [
-        ("Standby with the remote", TRANSITION_SKIPPED),
-        ("On with the remote", TRANSITION_SKIPPED),
-        ("Standby the usual way", TRANSITION_NOT_REPORTED),
-    ]
-    assert report.standby_remote is None
-    assert report.on is None
-    assert report.standby is not None
-
-
-async def test_gather_read_only(soundbar: FakeSoundbar) -> None:
-    """Without --guided, nothing but requests is sent and nothing is asked."""
-    ask = AsyncMock()
-
-    async with TemescalClient(
-        "127.0.0.1", soundbar.port, response_timeout=0.2
-    ) as client:
-        report = await gather(client, ask=ask)
-
-    ask.assert_not_called()
-    assert report.on is None
-    assert {m["cmd"] async for m in _drain(soundbar)} == {"get"}
+    assert received_before_turning_on == []
+    assert report.power["remote"].woken_by_reading is True
+    assert report.power["remote"].on is not None
 
 
 async def _drain(soundbar: FakeSoundbar):  # type: ignore[no-untyped-def]
@@ -272,9 +385,9 @@ async def _drain(soundbar: FakeSoundbar):  # type: ignore[no-untyped-def]
     ("argv", "target", "expected"),
     [
         pytest.param(
-            ["report", "10.0.0.2", "--guided"],
+            ["report", "10.0.0.2"],
             "aiotemescal.report.main",
-            ["10.0.0.2", "--guided"],
+            ["10.0.0.2"],
             id="report",
         ),
         pytest.param(["10.0.0.2"], "aiotemescal.__main__._main", None, id="watch"),
@@ -294,18 +407,18 @@ def test_cli_dispatch(argv: list[str], target: str, expected: list[str] | None) 
         mock.assert_called_once_with(expected)
 
 
-def test_try_power_needs_guided(capsys: pytest.CaptureFixture[str]) -> None:
-    """--try-power alone is refused, since it needs someone at the device."""
+@pytest.mark.parametrize("option", ["--guided", "--try-power", "--name-modes"])
+def test_no_partial_report(option: str) -> None:
+    """The report always does everything, so the old options are refused."""
     with pytest.raises(SystemExit):
-        main(["report", "10.0.0.2", "--try-power"])
-
-    assert "--try-power needs --guided" in capsys.readouterr().err
+        main(["report", "10.0.0.2", option])
 
 
 async def test_unknown_sound_modes_are_named(soundbar: FakeSoundbar) -> None:
-    """Each sound mode without a name is selected and named, then the mode is restored."""
+    """Each sound mode without a name is selected and named, then restored."""
     soundbar.answers["EQ_VIEW_INFO"] = {"ai_eq_list": [0, 24, 26], "i_curr_eq": 0}
-    answers = iter(["", "Pure Voice", ""])
+    # No TV, ready, standby, still in standby, on, then the two names
+    answers = iter(["n", "", "", "y", "", "Pure Voice", ""])
 
     async def ask(prompt: str) -> str:
         return next(answers)
@@ -313,77 +426,9 @@ async def test_unknown_sound_modes_are_named(soundbar: FakeSoundbar) -> None:
     async with TemescalClient(
         "127.0.0.1", soundbar.port, response_timeout=0.2
     ) as client:
-        report = await gather(client, name_modes=True, ask=ask, mode_wait=0)
+        report = await gather(client, ask=ask, power_wait=0, settle_wait=0, mode_wait=0)
 
     assert report.mode_names == {24: "Pure Voice", 26: "nothing shown"}
     sent = [m["data"] async for m in _drain(soundbar) if m.get("cmd") == "set"]
     assert sent == [{"i_curr_eq": 24}, {"i_curr_eq": 26}, {"i_curr_eq": 0}]
     assert "| 24 | Pure Voice |" in render(report)
-
-
-async def test_no_unknown_sound_modes_nothing_is_selected(
-    soundbar: FakeSoundbar,
-) -> None:
-    """A device whose sound modes all have a name is left as it is."""
-    soundbar.answers["EQ_VIEW_INFO"] = {"ai_eq_list": [0, 7], "i_curr_eq": 0}
-    ask = AsyncMock(return_value="")
-
-    async with TemescalClient(
-        "127.0.0.1", soundbar.port, response_timeout=0.2
-    ) as client:
-        report = await gather(client, name_modes=True, ask=ask, mode_wait=0)
-
-    assert report.mode_names == {}
-    assert {m["cmd"] async for m in _drain(soundbar)} == {"get"}
-    assert "Unknown sound modes" not in render(report)
-
-
-async def test_gather_guided_device_woken_by_requests(soundbar: FakeSoundbar) -> None:
-    """A device woken by the state requests is put in standby again, not asked again."""
-    answers = iter(["", "n", "", "", "", "y"])
-    received_before_turning_on: list[dict[str, object]] = []
-
-    async def ask(prompt: str) -> str:
-        if "standby again" in prompt:
-            # Forget the requests made so far, to see what follows
-            async for _ in _drain(soundbar):
-                pass
-        elif "on with its remote" in prompt:
-            received_before_turning_on.extend([m async for m in _drain(soundbar)])
-        return next(answers)
-
-    async with TemescalClient(
-        "127.0.0.1", soundbar.port, response_timeout=0.2
-    ) as client:
-        report = await gather(client, guided=True, ask=ask, power_wait=0)
-
-    assert received_before_turning_on == []
-    question = (
-        "Is it still in standby after being asked for its state"
-        " (standby with the remote)?"
-    )
-    assert report.power_answers[question] == "no"
-    assert report.on is not None
-
-
-async def test_gather_guided_power_command_ignored(soundbar: FakeSoundbar) -> None:
-    """A power command that did nothing leads to the remote, not to a meaningless question."""
-    answers = iter(["", "y", "", "n", "", "n", "", "", "y"])
-    prompts: list[str] = []
-
-    async def ask(prompt: str) -> str:
-        prompts.append(prompt)
-        return next(answers)
-
-    async with TemescalClient(
-        "127.0.0.1", soundbar.port, response_timeout=0.2
-    ) as client:
-        report = await gather(
-            client, guided=True, try_power=True, ask=ask, power_wait=0
-        )
-
-    after_off = prompts.index("Did `set_power(False)` put it in standby? [y/n]")
-    assert prompts[after_off + 1].startswith("Put it in standby with its remote")
-    assert prompts[after_off + 2] == "Did `set_power(True)` turn it on? [y/n]"
-    assert prompts[after_off + 3].startswith("Turn it on with its remote")
-    assert report.power_answers["Did `set_power(False)` put it in standby?"] == "no"

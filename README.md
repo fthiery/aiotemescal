@@ -4,55 +4,33 @@ Asyncio client for LG soundbars and Wi-Fi speakers, speaking the "temescal"
 protocol used by the LG Wi-Fi Speaker app (TCP port 9741).
 
 It is a rewrite of [python-temescal](https://github.com/google/python-temescal),
-which was not designed for devices that are only intermittently present on the
-network, for example a soundbar powered through a smart plug. python-temescal
-has been archived, read-only, since 2023, so this project takes over its
-maintenance. Beyond the rewrite, it aims at handling each model as it really
-behaves: what it reports, what it ignores, and when it leaves the network. It
-is used by the [LG Soundbars](https://www.home-assistant.io/integrations/lg_soundbar)
+archived since 2023, for devices that are only intermittently present on the
+network, for example a soundbar powered through a smart plug. It sends the same
+messages and reads the answers the same way, so models that worked with
+python-temescal should keep working. It is used by the
+[LG Soundbars](https://www.home-assistant.io/integrations/lg_soundbar)
 integration of Home Assistant.
-
-The messages it sends and the way it reads the answers are those of
-python-temescal, which has been used with many LG models through that
-integration, so models that worked with it should keep working.
 
 Features:
 
-- the connection is kept open in the background and re-established with an
-  exponential backoff;
-- a power cut is noticed within seconds through tuned TCP keepalive and
-  `TCP_USER_TIMEOUT`, without any application traffic (on Linux, see
-  [Power loss detection](#power-loss-detection));
-- the backoff can be skipped when you know the device is back, and the
-  address can be changed without restarting the client;
-- after each connection, the whole state is requested and delivered to
-  subscribers before the connection is reported, so a device that comes back
-  is never shown with the state it had before;
-- connection state changes are reported to subscribers;
+- the connection is kept open in the background and re-established with a
+  backoff;
+- a power loss is noticed within seconds, without application traffic (on
+  Linux);
+- after each connection, the whole state is requested before the connection is
+  reported, so a device that comes back is never shown with its old state;
 - requests can be awaited for their answer.
 
 ## Contents
 
 - [Usage](#usage)
-- [Reconnection](#reconnection)
-- [Power loss detection](#power-loss-detection)
+- [Connection](#connection)
 - [Power state](#power-state)
-  - [Silent devices](#silent-devices)
-- [Debugging](#debugging)
+- [Command line](#command-line)
 - [Tests](#tests)
-- [Tested devices](#tested-devices)
+- [Devices](#devices)
 - [Contributing](#contributing)
-  - [Report your device](#report-your-device)
-  - [Add a device page](#add-a-device-page)
-  - [Test against your device](#test-against-your-device)
 - [Future work](#future-work)
-  - [Devices without power control](#devices-without-power-control)
-  - [Waking devices in standby](#waking-devices-in-standby)
-  - [Devices that go silent after a manual shutdown](#devices-that-go-silent-after-a-manual-shutdown)
-  - [Unknown inputs and sound modes](#unknown-inputs-and-sound-modes)
-  - [Support for more models](#support-for-more-models)
-  - [Power loss detection outside Linux](#power-loss-detection-outside-linux)
-  - [Identity from mDNS](#identity-from-mdns)
 - [Credits](#credits)
 - [License](#license)
 
@@ -84,81 +62,67 @@ async with TemescalClient("192.168.1.15") as client:
 ```
 
 `request()` and `send()` raise `TemescalConnectionError` when the device is not
-connected or does not acknowledge them, and `request()` raises `TemescalTimeoutError` when no answer arrives.
+connected or does not acknowledge them, and `request()` raises
+`TemescalTimeoutError` when no answer arrives. Every message received from the
+device, answers and unsolicited updates alike, is delivered to the
+`subscribe()` callbacks.
 
-Every message received from the device is delivered to the `subscribe()`
-callbacks, including answers to requests and unsolicited status updates.
+## Connection
 
-## Reconnection
+### Reconnection
 
 While the device is unreachable, the client retries with a backoff that grows
-from 1 to 5 s. If you learn by other means that the device is back, call
-`reconnect_now()` to retry right away; it does nothing while connected.
-`set_host()` changes the address of the device and retries right away.
+from 1 to 5 s. `reconnect_now()` retries right away, for example when the
+device announces itself; it does nothing while connected. `set_host()` changes
+the address and retries right away.
 
-A device can also disconnect on its own; the [device pages](#tested-devices)
-list the cases observed on each model.
+On each connection, the client asks for `SPK_LIST_VIEW_INFO`,
+`FUNC_VIEW_INFO`, `EQ_VIEW_INFO`, `SETTING_VIEW_INFO` and `PLAY_INFO`, and
+reports the connection once they are answered or timed out. Some devices wake
+up when asked for their state in standby (see
+[Future work](#waking-devices-in-standby)).
 
-## Power loss detection
+### Power loss detection
 
 A device that loses power stops acknowledging TCP packets. The client
 configures the socket so that the kernel closes such a connection after about
 10 s when idle (keepalive probes after 5 s of silence, every second, five
 missed), or 4 s after a command that is not acknowledged. Five probes rather
-than fewer, because Wi-Fi links lose a packet now and then: on the SP8YA, about
-one ping in 10 to 30 failed while the device was fine, and with two probes a
-short gap was enough to close a healthy connection.
+than fewer, so that a Wi-Fi link that loses a packet now and then does not
+close a healthy connection.
 
-Commands wait for the device to acknowledge them at the TCP level before
-returning, which takes a few milliseconds on a local network. A command sent to
-a device that just lost power therefore raises `TemescalConnectionError` once
-the connection is closed, instead of returning as if it had been delivered.
+Commands wait for the device to acknowledge them at the TCP level, so a command
+sent to a device that just lost power raises `TemescalConnectionError` instead
+of returning as if it had been delivered.
 
-**This relies on Linux socket options.** Each option is only set when Python
-exposes it on the running system, and `TCP_USER_TIMEOUT` only exists on Linux.
-Where an option is missing, the default of the operating system applies, which
-is often two hours of silence before the first keepalive probe. Apart from the
-check of [silent devices that are on](#silent-devices), the client sends no
-application-level heartbeat, so a device that loses power while the connection
-is idle can then go unnoticed for that long. Home Assistant OS and other Linux
-hosts are not affected.
-
-## Power state
-
-`power_on` is the last power state the device reported (`b_powerstatus`), or
-`None` while it is unknown. `reports_power` tells whether the device reports it
-at all: `None` until the first answer to `SPK_LIST_VIEW_INFO`, then `False` if
-that answer had no `b_powerstatus`, and `True` as soon as one is seen. Devices
-that never report it, like the SP8YA, also ignore `set_power()` (see
-[Devices without power control](#devices-without-power-control)), so an
-application can hide its power control when `reports_power` is `False`.
+This relies on Linux socket options (`TCP_USER_TIMEOUT` only exists on Linux).
+Elsewhere, the defaults of the operating system apply, often two hours of
+silence before the first keepalive probe. Home Assistant OS is not affected.
 
 ### Silent devices
 
 Some devices stop sending updates without closing the connection, while still
 acknowledging at the TCP level, which keepalive cannot notice. When a device
 that reported being on has sent nothing for `idle_timeout` seconds (30 by
-default), the client asks it for `SPK_LIST_VIEW_INFO`. If no answer arrives,
-the connection is closed and opened again, which requests the whole state.
-Devices in standby and devices that do not report their power state are never
-asked, so this does not apply to the SP8YA. The LG S95Q was reported to behave
-this way (see its [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md)).
+default), the client asks it for `SPK_LIST_VIEW_INFO`, and reconnects if no
+answer arrives. Devices in standby and devices that do not report their power
+state are never asked, since asking can wake them.
 
-Asking a device in standby for its state is not always safe. The S95Q stays
-in standby, but the SP8YA wakes up when it receives a request after being put
-in standby with its remote (opening the connection alone does not wake it).
-The client asks for the whole state on every connection, so it can wake such a
-device, for example after its daily restart (see [Waking devices in
-standby](#waking-devices-in-standby)). The guided report checks it.
+## Power state
 
-## Debugging
+`power_on` is the last power state the device reported (`b_powerstatus`), or
+`None` while it is unknown. `reports_power` is `None` until the first answer
+to `SPK_LIST_VIEW_INFO`, then `False` if that answer had no `b_powerstatus`,
+and `True` as soon as one is seen. Devices that never report it generally
+ignore `set_power()` too, so an application can hide its power control when
+`reports_power` is `False`.
+
+## Command line
 
 ```
-python -m aiotemescal 192.168.1.15 -v
+uvx aiotemescal 192.168.1.15 -v                  # print every message and connection change
+uvx aiotemescal report 192.168.1.15 -o report.md # describe the device (see Contributing)
 ```
-
-prints every message and connection change; use it while cutting power to the
-device to see how quickly the loss and the return are detected.
 
 ## Tests
 
@@ -171,230 +135,137 @@ make test-power-cycle TEMESCAL_HOST=192.168.1.127  # asks you to unplug and repl
 
 `TEMESCAL_PORT` overrides the default port 9741.
 
-## Tested devices
+## Devices
 
-| Model | Firmware (main / micom / Chromecast) | Notes |
-| --- | --- | --- |
-| LG SP8YA | 2407090 / 2207202 / 1.56.310669 | [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md) |
-| LG S95Q (S95QR) | 2603241 / 2501151 / 1.56.310669 | [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md) |
+Models differ in what they report, what they support and when they leave the
+network. What was learned on each is in its device page:
 
-Models that worked with python-temescal are expected to work too; this table
-only lists the ones tested with aiotemescal itself. The versions are those
-reported in `UPDATE_VIEW_INFO`. Each device page gathers what was learned on
-that model: how it identifies itself, when it disconnects by itself, and what
-it supports, such as power control.
+- [LG SP8YA](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md)
+- [LG S95Q](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md)
+- [other models](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/other-models.md),
+  reported by others but not tested with aiotemescal
 
 ## Contributing
 
-The protocol works the same across models, but the details differ: some report
-their power state and others do not, some report their unique identifier
-(`s_uuid`) in `MAC_INFO_DEV`, others only in `PRODUCT_INFO` (the S90QY,
-according to [home-assistant/core#77856](https://github.com/home-assistant/core/pull/77856))
-or not at all (the SP8YA), some offer inputs or sound modes that have no name
-in this library yet, some need internet access to stay reachable. Handling
-these differences faithfully is a goal of this project, and only one model
-has been examined in detail so far. A report from your device is the most
-useful contribution, even if everything works.
+A report from your device is the most useful contribution, even if everything
+works.
 
 ### Report your device
 
-With [uv](https://docs.astral.sh/uv/), from any machine on the same network as
-the device, with the LG app closed (it queries the device, which interferes
-with what the report observes):
+With [uv](https://docs.astral.sh/uv/), from a machine on the same network as
+the device, while at the device. Close the LG app and temporarily disable the
+LG Soundbars integration of Home Assistant, or any other client of the device:
+they query it, which can turn it on and hides what it sends by itself.
 
 ```
-uvx aiotemescal report 192.168.1.15                         # read-only
-uvx aiotemescal report 192.168.1.15 --guided                # asks you to put it in standby and on
-uvx aiotemescal report 192.168.1.15 --guided --try-power    # also tries the power commands
-uvx aiotemescal report 192.168.1.15 --guided --name-modes   # also asks the names of unknown sound modes
+uvx aiotemescal report 192.168.1.15 -o report.md
 ```
 
-- Without options, the report only asks the device for its state: nothing is
-  changed. It lists what the device reports, the inputs and sound modes it
-  offers, and the messages it does not answer.
-- `--guided` asks you to put the device in standby, then to turn it on, with
-  its remote or its own button, then to put it in standby the way you usually
-  do (TV off, for example). Steps can be skipped, for example without a remote
-  at hand. Do not use the LG app for these steps: it queries the device, which
-  can wake it up and hides what the device reports by itself. For each power change, the report says whether the device sent
-  `b_powerstatus` by itself, only reported it when asked, or not at all, which
-  tells whether, and how, its power state can be followed. It also compares
-  its full state on and in standby, and records every message the device sends
-  by itself. After each standby, it asks whether reading the state woke the
-  device up; if it did, it asks you to put it in standby again, without
-  reading the state, before turning it on.
-- `--try-power` also sends the power commands, which turn the device off and
-  on, and asks you whether they worked, before reading the state. If one did
-  nothing, it asks you to use the remote instead, so that the next one can
-  still be checked.
-- `--name-modes` selects each sound mode that has no name in aiotemescal, asks
-  you which name the display of the soundbar shows for it, then restores the
-  current sound mode. It can be used with or without `--guided`.
+The report always does every step, so that reports can be compared:
 
-`--try-power` and `--name-modes` are the only options that change the device.
+- it reads the state: what the device reports, the inputs and sound modes it
+  offers, and the messages it does not answer;
+- it asks you to put the device in standby, then to turn it on, first with its
+  remote, then with the TV if the device follows it. For each change, it
+  records what the device sends by itself, compares the state on and in
+  standby, asks whether reading the state in standby turned it on, and
+  concludes whether the power state can be followed;
+- it selects each sound mode that has no name yet, asks which name the display
+  shows, then restores the current mode.
 
-Some behaviours only show up over time, or not every time: a device that stops
-sending updates while it is idle, or after being turned off by hand. The
-report runs for a few minutes on a single connection and cannot catch them.
-To look for them, watch the device with debug logs for a longer while, turning
-it on and off as you usually do, and paste the relevant part:
-
-```
-uvx aiotemescal 192.168.1.15 -v
-```
-
-The report is printed as Markdown, ready to paste (`-o FILE` writes it to a
-file). IP addresses, MAC addresses, UUIDs and the names you gave the device are
-replaced with `<redacted>`; `--no-redact` keeps them. Read it before posting.
-
-Then [open an issue](https://github.com/fthiery/aiotemescal//issues/new?template=device_report.md)
-with the report, and anything you noticed that the report cannot see: how the
-device is connected to the TV, whether it loses the connection by itself.
-
-Example, a read-only report of the tested SP8YA while in standby:
-
-````markdown
-## aiotemescal device report
-
-aiotemescal 0.4.0, Python 3.14.10, Linux x86_64
-
-### Findings
-
-- Model: SP8YA
-- Firmware (main / micom / Chromecast): 2407090 / 2207202 / 1.56.310669
-- Power state: not reported (no `b_powerstatus`), run with --guided to find out which fields change between on and standby
-- Unique id: not reported (no `s_uuid`)
-- Inputs offered: 0 (Wi-Fi), 1 (Bluetooth), 15 (Optical/HDMI ARC), 6 (HDMI), 19 (USB2)
-- Sound modes offered: 19 (AI Sound Pro), 0 (Standard), 7 (Cinema), 20 (Clear Voice), 21 (Sports), 6 (Music), 22 (Game), 14 (Bass Blast), 5 (User), 15 (Dolby Atmos), 23 (unknown)
-- Sound modes without a name in aiotemescal: 23
-- Current input: 4 (Optical)
-- No answer to: `MAC_INFO_DEV`
-
-<details><summary>Full state</summary>
+An example session with an SP8YA, which any request turns on in standby (what
+you type is after `[y/n]`; the other prompts only wait for Enter):
 
 ```text
-# current
-(shortened: one line per message, for all nine messages)
-FUNC_VIEW_INFO: {"ai_func_list": [0, 1, 15, 6, 19], "b_connect": false, "i_curr_func": 4, "s_spk_bt_name": "<redacted>"}
-PRODUCT_INFO: {"i_model_no": 0, "i_model_type": 0, "i_network_type": 1, "s_model_name": "SP8YA"}
+$ uvx aiotemescal report 192.168.1.15 -o report.md
+Run the report at the device, with its remote: it asks you to put the device in standby and to turn it on, with its remote and then with the TV, and selects each sound mode without a name before restoring the current one.
+Keep the LG app closed and the Home Assistant integration disabled during the report: they query the device, which interferes with what the report observes.
+Does the device turn on and off with the TV (HDMI ARC or eARC, optical)? [y/n] y
+Make sure the device is on, then press Enter.
+Put the device in standby with its remote or its own button, and wait until it is in standby (display off), then press Enter.
+Is it still in standby now that its state was read? [y/n] n
+Put it in standby again with its remote or its own button, wait until it is done, then press Enter.
+Turn the device on with its remote or its own button, then press Enter.
+Make sure the TV is on and the device is on with it, then press Enter.
+Turn the TV off, and wait until the device follows it into standby (display off), then press Enter.
+Is it still in standby now that its state was read? [y/n] n
+Turn the TV on then off again, so that the device follows it into standby, wait until it is done, then press Enter.
+Turn the TV on, and wait until the device follows it, then press Enter.
+Report written to report.md
 ```
 
-</details>
-````
+`-o` writes the Markdown report to a file, which keeps it apart from the
+questions asked on the terminal. Addresses, UUIDs and names are replaced with
+`<redacted>` (`--no-redact` keeps them). Behaviours that only show up over
+time are not caught by the report: watch the device with
+`uvx aiotemescal HOST -v` for a while and paste the relevant part.
+
+Then [open an issue](https://github.com/fthiery/aiotemescal/issues/new?template=device_report.md)
+with the report and anything it cannot see, such as how the device is
+connected to the TV.
 
 ### Add a device page
 
-To document a model, copy [`docs/devices/_template.md`](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/_template.md)
-to `docs/devices/lg-<model>.md`, fill it from the report and your observations,
-and add a row to the table above. [`docs/devices/lg-sp8ya.md`](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md)
-is an example.
+Copy [`docs/devices/_template.md`](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/_template.md)
+to `docs/devices/lg-<model>.md`, fill it from the report and your
+observations, and add it to [Devices](#devices).
 
 ### Test against your device
 
-If you clone the repository, the [live tests](#tests) check the client against
-a real device: `make test-live` is read-only, `make test-actions` changes
-settings and restores them, and `make test-power-cycle` needs you to unplug the
-device.
+The [live tests](#tests) check the client against a real device.
 
 ## Future work
 
 ### Devices without power control
 
-`set_power()` does not come from python-temescal. It sends the `b_powerkey` key
-proposed in [a pull request to python-temescal](https://github.com/mjg59/python-temescal/pull/1)
-in 2022, which was never merged, and which the Home Assistant integration
-copied in 2024 ([home-assistant/core#127022](https://github.com/home-assistant/core/pull/127022)).
-It worked on the device of whoever added it, but no model was named, and it
-does not work everywhere:
-
-| Model | `set_power()` | Power state | Source |
-| --- | --- | --- | --- |
-| SP8YA | ignored, on and off | never reported | [device page](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md#power) |
-| SK8 | does nothing | always shown as on, even after the remote | [comment](https://github.com/mjg59/python-temescal/pull/1) of 2024-12-26 |
-| DSP11RA | turns it on, not off | always shown as on | [comment](https://github.com/mjg59/python-temescal/pull/1) of 2025-04-16 |
-
-The client currently sends the command anyway, and an application cannot tell
-whether it did anything. This needs to be handled:
-
-- tell whether a device supports power control, so that applications can hide
-  their power button. `reports_power` is a first step, since none of the models
-  above reports `b_powerstatus`, but the DSP11RA shows that support can also
-  be partial;
-- where it is reliable, follow the power state from other fields, such as
-  `b_connect` on the SP8YA (only confirmed with the TV as the source so far).
-
-Reports from other models (see [Contributing](#contributing)) are needed to
-know which models are affected and which fields can be trusted.
+`set_power()` sends the `b_powerkey` key from
+[an unmerged python-temescal pull request](https://github.com/mjg59/python-temescal/pull/1),
+also used by the Home Assistant integration since
+[home-assistant/core#127022](https://github.com/home-assistant/core/pull/127022).
+Some models ignore it, others only follow it one way, and the client cannot
+tell. Applications need to know whether a device supports power control, and,
+where it is reliable, its power state could be followed from other fields.
 
 ### Waking devices in standby
 
-The SP8YA wakes up, on its optical input, when it receives any request while
-in standby after being put there with its remote (each of the seven state
-messages was tried); it did not on 2026-11-08 after going to standby by itself
-when the TV was turned off. The client asks for the
-whole state on every connection, including reconnections, for example after
-the daily restart of the device or when its power comes back, which can turn
-it on at night. Skipping the requests while the device is known to be off does
-not help here, since the SP8YA does not report its power state, and avoiding
-some messages does not either, since any of them wakes it. Avoiding this would
-mean not asking for the state on reconnection for such models, and relying on
-what they report by themselves, at the cost of a state that may be stale after
-a reconnection.
+Some devices turn on when they receive any request in standby. Since the
+client asks for the whole state on every connection, a reconnection while
+such a device is in standby turns it on. Avoiding it would mean not asking for
+the state on reconnection for these devices, and relying on what they report
+by themselves, at the cost of a state that may be stale.
 
-### Devices that go silent after a manual shutdown
+### Devices that go silent in standby
 
-On the S95Q, the connection sometimes stops delivering updates after the
-device is turned off by hand, while the socket still looks open, so the next
-power-on is never reported. The check of [silent devices](#silent-devices)
-only covers devices that are on, so it misses this case. A possible fix is to
-ask the device for its state a few seconds after it reports turning off, and
-to reconnect if it does not answer, without reporting the device as
-unavailable when the reconnection succeeds right away.
+Some devices stop delivering updates after being turned off by hand, so the
+next power-on is never reported. The [silent device](#silent-devices) check
+only covers devices that are on. A fix could ask for the state a few seconds
+after the device reports turning off, and reconnect if it does not answer.
 
 ### Unknown inputs and sound modes
 
-The input and sound mode tables come from python-temescal and stop at the
-models it knew. Sound mode 23 was named "Sound Share" from the display of the
-[SP8YA](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-sp8ya.md#inputs-and-sound-modes); the
-[S95Q](https://github.com/fthiery/aiotemescal/blob/main/docs/devices/lg-s95q.md#inputs-and-sound-modes) also offers modes 24
-to 26, which have no name yet; applications show them as unknown. Their names have to be found and added to `equalisers` in
-`const.py`, along with any index reported by other models. The report lists
-these indices under "without a name in aiotemescal", and `--name-modes` asks
-for their names.
+The input and sound mode tables come from python-temescal. Indices reported by
+newer models need names in `const.py`; the report lists them and asks for
+their names.
 
 ### Support for more models
 
-The client treats every model the same way, as python-temescal did. Handling
-each model as it really behaves means:
-
-- turning the reports people send (see [Contributing](#contributing)) into
-  test fixtures, by loading the state of a report into the fake soundbar of
-  the tests, so that the behaviour of each model stays covered without the
-  device;
-- telling applications what a model supports, starting with power control
-  (see above), instead of each application finding out by itself;
-- completing the input and sound mode tables (see above).
+Turn device reports into test fixtures for the fake soundbar, so that each
+model stays covered without the device, and tell applications what a model
+supports instead of each finding out by itself.
 
 ### Power loss detection outside Linux
 
-The client should run on macOS and Windows, which is enough for development,
-but it has only been tested on Linux. The keepalive options are only set when
-Python exposes them under their Linux names, and commands do not wait for the
-device to acknowledge them, so how quickly a power loss is noticed there is
-unknown: it may take up to the two hours of the system default (see
-[Power loss detection](#power-loss-detection)). Making this match Linux would
-mean setting the equivalents those systems have, such as `TCP_KEEPALIVE` on
-macOS, and testing on them. Since Home Assistant runs on Linux, this is not a
-priority.
+There, commands do not wait for the device to acknowledge them, and the
+keepalive options are only set under their Linux names. Set the equivalent
+options on macOS and Windows (such as `TCP_KEEPALIVE` on macOS) and test
+there. Not a priority, since Home
+Assistant runs on Linux.
 
 ### Identity from mDNS
 
-Some devices give no stable identifier over the protocol: the SP8YA never
-reports `s_uuid` and does not answer `MAC_INFO_DEV`. They do advertise one over
-mDNS, as `LG_SMART_AUDIO-<uuid>._lg-smart-device._tcp.local.` with the UUID and
-the IPv4 address in the TXT record. A helper that reads the UUID and the
-address from such an announcement would spare each application from parsing
-it.
+Some devices give no stable identifier over the protocol but advertise one
+over mDNS (`_lg-smart-device._tcp.local.`). A helper that reads it would spare
+each application from parsing it.
 
 ## Credits
 

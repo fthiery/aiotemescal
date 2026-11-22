@@ -20,10 +20,13 @@ labels: device report
 ## Report
 
 <!--
-Paste the output of:
+Paste the content of report.md, written by:
 
-    uvx aiotemescal report <address of the device> --guided
+    uvx aiotemescal report <address of the device> -o report.md
 
-Add --try-power if you can check at the device whether it turns off and on.
+Run it at the device, with the LG app closed and the Home Assistant integration
+temporarily disabled, and its remote at hand: it asks you to put the device in
+standby and to turn it on, with the remote and then with the TV, and to say
+what its display shows.
 Read it before posting: addresses and names are redacted, but check anyway.
 -->
