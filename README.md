@@ -134,6 +134,7 @@ make test                                          # unit tests, against a fake 
 make test-live TEMESCAL_HOST=192.168.1.127         # read-only tests against a real device
 make test-actions TEMESCAL_HOST=192.168.1.127      # changes and restores settings, input and power
 make test-power-cycle TEMESCAL_HOST=192.168.1.127  # asks you to unplug and replug it, twice
+make test-all TEMESCAL_HOST=192.168.1.127          # all of the above in a single run
 ```
 
 `TEMESCAL_PORT` overrides the default port 9741.
