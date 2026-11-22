@@ -101,6 +101,11 @@ network standby. The report of 2026-11-22 recorded what it sends by itself:
   `i_curr_func: 4` (Optical), then `20` (E-ARC) with `b_connect: true`, each
   followed by `SPK_LIST_VIEW_INFO` and `PLAY_INFO`. Turning the TV on while
   the soundbar is already on sends only the `20` (E-ARC) part.
+- **Being woken by a request** sends `FUNC_VIEW_INFO` with `i_curr_func: 4`
+  about half a second later, followed by `SPK_LIST_VIEW_INFO` and `PLAY_INFO`
+  (`b_connect` is `true` if the TV is on). This was seen after a standby with
+  the remote and with the TV, so a client can at least tell that it woke the
+  soundbar.
 - **Going to standby with the TV** sends nothing, twice in that report: no
   message has `b_connect: false`. On 2026-11-08 a `FUNC_VIEW_INFO` with
   `b_connect: false` and `i_curr_func: 4` had been seen on each change, but its

@@ -245,7 +245,12 @@ class TemescalClient:
     async def request(
         self, msg: str, data: dict[str, Any] | None = None, cmd: str = "get"
     ) -> dict[str, Any]:
-        """Send a message and return the next message of the same type."""
+        """Send a message and return the device's answer to it.
+
+        The answer is the next message of the same type, except the updates the
+        device sends by itself (``notibyset``), which often carry only the fields
+        that changed.
+        """
         future: asyncio.Future[dict[str, Any]] = (
             asyncio.get_running_loop().create_future()
         )
@@ -426,9 +431,10 @@ class TemescalClient:
             self._reports_power = False
 
     def _dispatch(self, message: dict[str, Any]) -> None:
-        for future in self._pending.get(message.get("msg", ""), []):
-            if not future.done():
-                future.set_result(message)
+        if message.get("cmd") != "notibyset":
+            for future in self._pending.get(message.get("msg", ""), []):
+                if not future.done():
+                    future.set_result(message)
         for callback in list(self._message_callbacks):
             try:
                 callback(message)

@@ -53,6 +53,32 @@ async def test_request(soundbar: FakeSoundbar, client: TemescalClient) -> None:
     }
 
 
+async def test_request_ignores_updates(
+    soundbar: FakeSoundbar, client: TemescalClient
+) -> None:
+    """An update the device sends by itself is not taken for the answer.
+
+    The SP8YA pushes partial FUNC_VIEW_INFO updates when it changes state, which
+    used to be returned instead of the full answer that followed.
+    """
+    soundbar.answers["FUNC_VIEW_INFO"] = {"ai_func_list": [0, 1], "i_curr_func": 4}
+    soundbar.responsive = False
+    request = asyncio.create_task(client.request("FUNC_VIEW_INFO"))
+    await asyncio.sleep(0.05)
+    await soundbar.push(
+        {"cmd": "notibyset", "msg": "FUNC_VIEW_INFO", "data": {"i_curr_func": 4}}
+    )
+    await asyncio.sleep(0.05)
+    assert not request.done()
+    await soundbar.push(
+        {"cmd": "notibyget", "msg": "FUNC_VIEW_INFO", "data": {"ai_func_list": [0, 1]}}
+    )
+
+    answer = await request
+
+    assert answer["data"] == {"ai_func_list": [0, 1]}
+
+
 @pytest.mark.parametrize(
     ("action", "sent"),
     [
