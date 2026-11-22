@@ -234,17 +234,40 @@ async def test_change_and_restore(
     await wait_for_value(client, msg, key, original)
 
 
-async def test_power_off_and_on(client: TemescalClient) -> None:
-    """The device stays reachable through standby.
+async def wait_for_power(client: TemescalClient, on: bool) -> None:
+    """Wait until the device reports the power state, by itself or when asked.
 
-    The device reports neither its power state nor an answer to the power key,
-    so whether it actually turned off and on can only be seen on it. It must
-    be on before the test, which leaves it on.
+    Only for devices that report it: asking others in standby can turn them on.
     """
+    async with asyncio.timeout(20):
+        while client.power_on is not on:
+            await client.request(MSG_SPK_LIST_VIEW_INFO)
+            await asyncio.sleep(2)
+
+
+async def test_power_off_and_on(client: TemescalClient) -> None:
+    """set_power() turns off and on a device that reports its power state.
+
+    A device that does not report it (SP8YA) is only checked to acknowledge both
+    commands and keep the connection: whether it actually turned off and on can
+    only be seen on it, and asking for its state in standby could turn it back
+    on. The device must be on before the test, which leaves it on.
+    """
+    # The answer tells whether the device reports its power state
+    await client.request(MSG_SPK_LIST_VIEW_INFO)
+
+    if client.reports_power:
+        assert client.power_on is True
+        await client.set_power(False)
+        await wait_for_power(client, False)
+        await client.set_power(True)
+        await wait_for_power(client, True)
+        return
+
+    # Each command raises unless the device acknowledged it
     await client.set_power(False)
     await asyncio.sleep(10)
-    assert (await client.request(MSG_SPK_LIST_VIEW_INFO))["data"]["s_user_name"]
-
+    assert client.connected
     await client.set_power(True)
     await asyncio.sleep(10)
     assert client.connected
