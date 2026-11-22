@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from aiotemescal import TemescalClient, TemescalConnectionError, TemescalTimeoutError
-from aiotemescal.client import STATE_MESSAGES, _unacknowledged
+from aiotemescal.client import _TCP_OPTIONS, STATE_MESSAGES, _unacknowledged
 
 from .conftest import FakeSoundbar, free_port
 
@@ -51,6 +51,32 @@ async def test_request(soundbar: FakeSoundbar, client: TemescalClient) -> None:
         "msg": "SPK_LIST_VIEW_INFO",
         "data": {"s_user_name": "Salon", "i_vol": 7},
     }
+
+
+async def test_request_ignores_updates(
+    soundbar: FakeSoundbar, client: TemescalClient
+) -> None:
+    """An update the device sends by itself is not taken for the answer.
+
+    The SP8YA pushes partial FUNC_VIEW_INFO updates when it changes state, which
+    used to be returned instead of the full answer that followed.
+    """
+    soundbar.answers["FUNC_VIEW_INFO"] = {"ai_func_list": [0, 1], "i_curr_func": 4}
+    soundbar.responsive = False
+    request = asyncio.create_task(client.request("FUNC_VIEW_INFO"))
+    await asyncio.sleep(0.05)
+    await soundbar.push(
+        {"cmd": "notibyset", "msg": "FUNC_VIEW_INFO", "data": {"i_curr_func": 4}}
+    )
+    await asyncio.sleep(0.05)
+    assert not request.done()
+    await soundbar.push(
+        {"cmd": "notibyget", "msg": "FUNC_VIEW_INFO", "data": {"ai_func_list": [0, 1]}}
+    )
+
+    answer = await request
+
+    assert answer["data"] == {"ai_func_list": [0, 1]}
 
 
 @pytest.mark.parametrize(
@@ -247,7 +273,22 @@ async def test_tcp_options(client: TemescalClient) -> None:
     assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == 5
     assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == 1
     assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == 5
-    assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 4000
+    assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 10000
+
+
+def test_user_timeout_lets_every_keepalive_probe_run() -> None:
+    """TCP_USER_TIMEOUT overrides TCP_KEEPCNT, so it must outlast all the probes.
+
+    Shorter, the kernel closes the connection at the first probe left unanswered
+    for a second, which made a device slow to answer after going to standby look
+    gone.
+    """
+    options = dict(_TCP_OPTIONS)
+    probes_ms = (
+        options["TCP_KEEPIDLE"] + options["TCP_KEEPINTVL"] * options["TCP_KEEPCNT"]
+    ) * 1000
+
+    assert options["TCP_USER_TIMEOUT"] >= probes_ms
 
 
 async def test_reconnect_now_skips_the_backoff() -> None:

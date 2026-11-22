@@ -86,10 +86,13 @@ up when asked for their state in standby (see
 
 A device that loses power stops acknowledging TCP packets. The client
 configures the socket so that the kernel closes such a connection after about
-10 s when idle (keepalive probes after 5 s of silence, every second, five
-missed), or 4 s after a command that is not acknowledged. Five probes rather
-than fewer, so that a Wi-Fi link that loses a packet now and then does not
-close a healthy connection.
+10 s, whether it is idle (keepalive probes after 5 s of silence, every second,
+five missed) or a command is not acknowledged. Five probes rather than fewer,
+so that a Wi-Fi link that loses a packet now and then, or a device slow to
+answer right after going to standby, does not close a healthy connection.
+`TCP_USER_TIMEOUT` is set to the same 10 s, since the kernel also uses it to
+give up on keepalive: shorter, a single unanswered probe would close the
+connection.
 
 Commands wait for the device to acknowledge them at the TCP level, so a command
 sent to a device that just lost power raises `TemescalConnectionError` instead
