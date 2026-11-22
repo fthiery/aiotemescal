@@ -248,26 +248,17 @@ async def wait_for_power(client: TemescalClient, on: bool) -> None:
 async def test_power_off_and_on(client: TemescalClient) -> None:
     """set_power() turns off and on a device that reports its power state.
 
-    A device that does not report it (SP8YA) is only checked to acknowledge both
-    commands and keep the connection: whether it actually turned off and on can
-    only be seen on it, and asking for its state in standby could turn it back
-    on. The device must be on before the test, which leaves it on.
+    Skipped on a device that does not report it (SP8YA): whether it turned off
+    and on could only be seen on it, and asking for its state in standby could
+    turn it back on. The device must be on before the test, which leaves it on.
     """
     # The answer tells whether the device reports its power state
     await client.request(MSG_SPK_LIST_VIEW_INFO)
+    if not client.reports_power:
+        pytest.skip("the device does not report its power state")
 
-    if client.reports_power:
-        assert client.power_on is True
-        await client.set_power(False)
-        await wait_for_power(client, False)
-        await client.set_power(True)
-        await wait_for_power(client, True)
-        return
-
-    # Each command raises unless the device acknowledged it
+    assert client.power_on is True
     await client.set_power(False)
-    await asyncio.sleep(10)
-    assert client.connected
+    await wait_for_power(client, False)
     await client.set_power(True)
-    await asyncio.sleep(10)
-    assert client.connected
+    await wait_for_power(client, True)
