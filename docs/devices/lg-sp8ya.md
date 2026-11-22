@@ -136,10 +136,16 @@ in standby when asked.
 When its power comes back (smart plug turned on), it starts on, before any
 request, so the client does not wake it in that case.
 
+It goes back to standby by itself after about 15 minutes without the TV. On
+2026-11-22, with the TV off and no client connected, its power was cut and
+restored at 02:18:32: it started on (11.3 W) and went to network standby (about
+4.4 W) at 02:33:52, according to its smart plug.
+
 Since the client asks for the whole state on every connection, a reconnection
 while it is in standby turns it on: after its [daily restart](#daily-restart),
-at night, or after a Wi-Fi loss. Whether it then goes back to standby by itself
-without the TV has not been checked.
+at night, or after a Wi-Fi loss. Presumably it then goes back to standby after
+the same 15 minutes, but this was only observed after its power came back, not
+after being woken by a request.
 
 ## Raw state
 
