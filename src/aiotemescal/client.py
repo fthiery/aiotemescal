@@ -42,10 +42,19 @@ _LOGGER = logging.getLogger(__package__)
 MAX_BODY_SIZE = 1 << 20
 
 # A device that loses power stops acknowledging, so the kernel detects it without
-# any application traffic: idle connections after 5 + 5 * 1 s of keepalive probes,
-# and connections with unacknowledged data (a command just sent) after 4 s. Five
-# probes, not fewer, so that a Wi-Fi link losing a packet now and then does not
-# close a healthy connection; 4 s stays below the 5 s wait for an acknowledgement
+# any application traffic: idle connections after 5 s of silence and 5 keepalive
+# probes 1 s apart, and connections with unacknowledged data (a command just
+# sent) after the same 10 s. Five probes, not fewer, so that a Wi-Fi link losing
+# a packet now and then, or a device slow to answer right after going to standby,
+# does not close a healthy connection.
+_KEEPIDLE = 5
+_KEEPINTVL = 1
+_KEEPCNT = 5
+# TCP_USER_TIMEOUT also decides when keepalive gives up (tcp(7)), and the kernel
+# closes the connection at the first unanswered probe once it has elapsed since
+# the last data received. Below the time the probes take, it would close the
+# connection after a single lost probe, whatever TCP_KEEPCNT says.
+_USER_TIMEOUT_MS = (_KEEPIDLE + _KEEPINTVL * _KEEPCNT) * 1000
 if sys.platform == "linux":
     import fcntl
     import termios
@@ -54,10 +63,10 @@ if sys.platform == "linux":
 _ACK_POLL_INTERVAL = 0.01
 
 _TCP_OPTIONS = (
-    ("TCP_KEEPIDLE", 5),
-    ("TCP_KEEPINTVL", 1),
-    ("TCP_KEEPCNT", 5),
-    ("TCP_USER_TIMEOUT", 4000),
+    ("TCP_KEEPIDLE", _KEEPIDLE),
+    ("TCP_KEEPINTVL", _KEEPINTVL),
+    ("TCP_KEEPCNT", _KEEPCNT),
+    ("TCP_USER_TIMEOUT", _USER_TIMEOUT_MS),
 )
 
 type MessageCallback = Callable[[dict[str, Any]], None]
@@ -211,8 +220,8 @@ class TemescalClient:
         """Wait until the device acknowledged everything sent, on Linux.
 
         A drained buffer only means the kernel took the data: a device that just
-        lost power acknowledges nothing, and TCP_USER_TIMEOUT then closes the
-        connection, which makes the command fail instead of being lost.
+        lost power acknowledges nothing, so the command fails instead of being
+        lost, and TCP_USER_TIMEOUT then closes the connection.
         """
         if sys.platform != "linux" or (sock := writer.get_extra_info("socket")) is None:
             return

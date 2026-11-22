@@ -27,6 +27,15 @@ What was learned on one SP8YA. It may or may not apply to other models.
 - Its Wi-Fi link loses a packet now and then: about one ping in 10 to 30
   failed while the device was fine. With two keepalive probes, a short gap was
   enough to close a healthy connection, which is why the client allows five.
+- Right after going to standby, it can take more than a second to answer a
+  keepalive probe. On 2026-11-22, in two reports out of three, the connection
+  was closed 6 to 10 s after going to standby, with the remote or the TV, and
+  the client reconnected at once. `TCP_USER_TIMEOUT` was then 4 s, which made a
+  single probe unanswered for a second enough to close the connection; it is
+  now 10 s, so that all five probes run. During a 3-minute watch the same day,
+  every probe was answered within a second and the connection held through
+  each power change. With 10 s, a full report the same day (five standbys, with
+  the remote and the TV) did not lose the connection once.
 
 ## Inputs and sound modes
 
@@ -90,9 +99,8 @@ network standby. The report of 2026-11-22 recorded what it sends by itself:
 
 - **Turning on with the TV** is reported. It sends `FUNC_VIEW_INFO` with
   `i_curr_func: 4` (Optical), then `20` (E-ARC) with `b_connect: true`, each
-  followed by `SPK_LIST_VIEW_INFO` and `PLAY_INFO`. Being woken by a request
-  just after the TV was turned off sent the same sequence. Turning the TV on while the
-  soundbar is already on sends only the `20` (E-ARC) part.
+  followed by `SPK_LIST_VIEW_INFO` and `PLAY_INFO`. Turning the TV on while
+  the soundbar is already on sends only the `20` (E-ARC) part.
 - **Going to standby with the TV** sends nothing, twice in that report: no
   message has `b_connect: false`. On 2026-11-08 a `FUNC_VIEW_INFO` with
   `b_connect: false` and `i_curr_func: 4` had been seen on each change, but its
