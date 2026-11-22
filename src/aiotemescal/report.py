@@ -48,7 +48,10 @@ RESPONSE_TIMEOUT = 2.0
 POWER_WAIT = 10.0
 # Time given to the device to settle after the user changed its power state,
 # so that the messages it sends by itself arrive before its state is read
-SETTLE_WAIT = 5.0
+SETTLE_WAIT = 10.0
+# How long to try connecting again when the connection was lost, for example
+# while the device restarts or loses its Wi-Fi for a moment
+RECONNECT_FOR = 60.0
 # Time given to the device to show a sound mode before asking for its name
 MODE_WAIT = 2.0
 
@@ -105,6 +108,8 @@ class PowerTest:
     woken_by_reading: bool | None = None
     # Messages the device sent by itself while going to "standby", then "on"
     pushed: dict[str, list[tuple[str, Any]]] = field(default_factory=dict)
+    # Connections lost while the device was in standby, then while it was on
+    lost: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -245,8 +250,8 @@ def power_detection(test: PowerTest) -> list[str]:
     """Say whether, and how, a power change made one way can be followed."""
     if test.on is None or test.standby is None:
         return [
-            "The connection was lost during a power change, so no state could be"
-            " compared."
+            "The device could not be reached after a power change, so no state"
+            " could be compared."
         ]
     lines = []
     for step, name in (("standby", "Going to standby"), ("on", "Turning on")):
@@ -255,6 +260,14 @@ def power_detection(test: PowerTest) -> list[str]:
             f"{name}: " + ("sent nothing by itself" if not sent else "sent by itself:")
         )
         lines += [f"  - {line}" for line in sent]
+    if test.lost:
+        lines.append(
+            "Connection lost: "
+            + ", ".join(
+                f"{count} time{'s' if count > 1 else ''} in {step}"
+                for step, count in test.lost.items()
+            )
+        )
     if test.woken_by_reading is not None:
         lines.append(
             "Reading the state in standby turned it on: "
@@ -328,6 +341,7 @@ def _redact_report(report: Report) -> Report:
                 standby=redact(test.standby),
                 on=redact(test.on),
                 woken_by_reading=test.woken_by_reading,
+                lost=test.lost,
                 pushed={
                     step: [(msg, redact(data)) for msg, data in messages]
                     for step, messages in test.pushed.items()
@@ -439,11 +453,35 @@ async def _yes_no(ask: Ask, question: str) -> str:
     return "yes" if answer.lower().startswith("y") else "no"
 
 
-async def _collect_or_none(client: TemescalClient) -> Snapshot | None:
-    try:
-        return await collect(client)
-    except TemescalConnectionError:
-        return None
+async def _reconnect(client: TemescalClient, reconnect_for: float) -> bool:
+    """Open the connection again if it was lost, without sending anything.
+
+    Opening a connection does not wake a device in standby, unlike a request.
+    """
+    deadline = time.monotonic() + reconnect_for
+    while not client.connected:
+        try:
+            await client.connect()
+        except TemescalConnectionError:
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(1)
+    return True
+
+
+async def _collect_or_none(
+    client: TemescalClient, reconnect_for: float = RECONNECT_FOR
+) -> Snapshot | None:
+    """Read the state, connecting again first if needed; None if unreachable."""
+    for _ in range(2):
+        if not await _reconnect(client, reconnect_for):
+            return None
+        try:
+            return await collect(client)
+        except TemescalConnectionError:
+            # Lost while reading: read everything again on a new connection
+            continue
+    return None
 
 
 async def gather(
@@ -452,6 +490,7 @@ async def gather(
     ask: Ask = _ask,
     power_wait: float = POWER_WAIT,
     settle_wait: float = SETTLE_WAIT,
+    reconnect_for: float = RECONNECT_FOR,
     mode_wait: float = MODE_WAIT,
 ) -> Report:
     """Collect a full report from a connected client, asking the user along the way."""
@@ -470,8 +509,14 @@ async def gather(
             pushed.append((message.get("msg", ""), message.get("data")))
             note(f"`{message.get('msg')}`", message.get("data"))
 
+    # The power test under way, and the state the user last put the device in
+    current: list[tuple[PowerTest, str]] = []
+
     def on_connection(connected: bool) -> None:
         note("connected" if connected else "connection lost")
+        if not connected and current:
+            test, state = current[-1]
+            test.lost[state] = test.lost.get(state, 0) + 1
 
     unsubscribe = (
         client.subscribe(on_message),
@@ -508,9 +553,13 @@ async def gather(
             mark = len(pushed)
             await ask(prompt + ", then press Enter.")
             note(f"user: {step}")
+            current.append((test, step))
             await asyncio.sleep(settle_wait)
             test.pushed[step] = pushed[mark:]
-            return await _collect_or_none(client)
+            snapshot = await _collect_or_none(client, reconnect_for)
+            if snapshot is None:
+                note("could not reach the device")
+            return snapshot
 
         follows_tv = await _yes_no(ask, QUESTION_FOLLOWS_TV) == "yes"
         for method, prepare, to_standby, to_standby_again, to_on in METHODS:
@@ -519,6 +568,8 @@ async def gather(
             # Recorded from here, so that the preparation is not taken for a change
             await ask(prepare + ", then press Enter.")
             note(f"user: ready for the test with the {method}")
+            # Let the messages that follow the preparation arrive before recording
+            await asyncio.sleep(settle_wait)
             test = report.power[method] = PowerTest()
             test.standby = await change(test, "standby", to_standby)
             if test.standby is not None:
@@ -535,12 +586,16 @@ async def gather(
                         to_standby_again + ", wait until it is done, then press Enter."
                     )
                     note("user: standby again")
+                    current.append((test, "standby"))
             test.on = await change(test, "on", to_on)
 
         last_on = next(
             (test.on for test in reversed(report.power.values()) if test.on), None
         )
-        await name_unknown_modes(last_on or report.snapshot, is_on=last_on is not None)
+        if await _reconnect(client, reconnect_for):
+            await name_unknown_modes(
+                last_on or report.snapshot, is_on=last_on is not None
+            )
         return report
     finally:
         for callback in unsubscribe:
@@ -571,8 +626,9 @@ def main(argv: list[str] | None = None) -> None:
         " current one.\n"
     )
     sys.stderr.write(
-        "Keep the LG app closed during the report: it queries the device, which"
-        " interferes with what the report observes.\n"
+        "Keep the LG app closed and the Home Assistant integration disabled during"
+        " the report: they query the device, which interferes with what the report"
+        " observes.\n"
     )
 
     try:

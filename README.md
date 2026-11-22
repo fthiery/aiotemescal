@@ -173,6 +173,27 @@ The report always does every step, so that reports can be compared:
 - it selects each sound mode that has no name yet, asks which name the display
   shows, then restores the current mode.
 
+An example session with an SP8YA, which any request turns on in standby (what
+you type is after `[y/n]`; the other prompts only wait for Enter):
+
+```text
+$ uvx aiotemescal report 192.168.1.15 -o report.md
+Run the report at the device, with its remote: it asks you to put the device in standby and to turn it on, with its remote and then with the TV, and selects each sound mode without a name before restoring the current one.
+Keep the LG app closed and the Home Assistant integration disabled during the report: they query the device, which interferes with what the report observes.
+Does the device turn on and off with the TV (HDMI ARC or eARC, optical)? [y/n] y
+Make sure the device is on, then press Enter.
+Put the device in standby with its remote or its own button, and wait until it is in standby (display off), then press Enter.
+Is it still in standby now that its state was read? [y/n] n
+Put it in standby again with its remote or its own button, wait until it is done, then press Enter.
+Turn the device on with its remote or its own button, then press Enter.
+Make sure the TV is on and the device is on with it, then press Enter.
+Turn the TV off, and wait until the device follows it into standby (display off), then press Enter.
+Is it still in standby now that its state was read? [y/n] n
+Turn the TV on then off again, so that the device follows it into standby, wait until it is done, then press Enter.
+Turn the TV on, and wait until the device follows it, then press Enter.
+Report written to report.md
+```
+
 `-o` writes the Markdown report to a file, which keeps it apart from the
 questions asked on the terminal. Addresses, UUIDs and names are replaced with
 `<redacted>` (`--no-redact` keeps them). Behaviours that only show up over

@@ -219,7 +219,7 @@ def test_power_detection_connection_lost() -> None:
     """A device that leaves the network in standby is reported as such."""
     text = render(Report(snapshot=ON, power={"TV": PowerTest(on=ON)}))
 
-    assert "The connection was lost during a power change" in text
+    assert "The device could not be reached after a power change" in text
 
 
 def test_render_redacted() -> None:
@@ -305,6 +305,51 @@ async def test_gather_without_tv(soundbar: FakeSoundbar) -> None:
         report = await gather(client, ask=ask, power_wait=0, settle_wait=0)
 
     assert list(report.power) == ["remote"]
+
+
+async def test_gather_reconnects(soundbar: FakeSoundbar) -> None:
+    """A connection lost during a power change is opened again before reading."""
+    answers = iter(["n", "", "", "y", ""])
+
+    async def ask(prompt: str) -> str:
+        if prompt.startswith("Turn the device on"):
+            # The device drops the connection, then accepts a new one
+            await soundbar.stop()
+            await asyncio.sleep(0.1)
+            await soundbar.start()
+        return next(answers)
+
+    async with TemescalClient(
+        "127.0.0.1", soundbar.port, response_timeout=0.2
+    ) as client:
+        report = await gather(client, ask=ask, power_wait=0, settle_wait=0)
+
+    assert report.power["remote"].on is not None
+    # Dropped while the device was in standby, before it was turned on
+    assert report.power["remote"].lost == {"standby": 1}
+    assert "Connection lost: 1 time in standby" in render(report)
+    events = [event for _, event, _ in report.timeline]
+    assert events.index("connection lost") < events.index("connected")
+
+
+async def test_gather_unreachable(soundbar: FakeSoundbar) -> None:
+    """A device that does not come back is reported as unreachable, not waited for."""
+    answers = iter(["n", "", "", "y", ""])
+
+    async def ask(prompt: str) -> str:
+        if prompt.startswith("Turn the device on"):
+            await soundbar.stop()
+        return next(answers)
+
+    async with TemescalClient(
+        "127.0.0.1", soundbar.port, response_timeout=0.2
+    ) as client:
+        report = await gather(
+            client, ask=ask, power_wait=0, settle_wait=0, reconnect_for=0
+        )
+
+    assert report.power["remote"].on is None
+    assert "could not reach the device" in [e for _, e, _ in report.timeline]
 
 
 async def test_gather_device_woken_by_reading(soundbar: FakeSoundbar) -> None:
