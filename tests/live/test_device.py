@@ -156,4 +156,6 @@ async def test_power_cycle_command_fails() -> None:
 
     # The command was in flight, not refused because the loss was already known
     assert "Not connected" not in str(error)
-    assert failed < 5
+    # It gives up waiting for the acknowledgement after the response timeout,
+    # 5 s by default, before TCP_USER_TIMEOUT closes the connection at 10 s
+    assert failed < 6
