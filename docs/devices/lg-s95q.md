@@ -2,6 +2,8 @@
 
 What was learned on one S95Q, reported by skynet01: a guided report with
 aiotemescal 0.5.0 on 2026-11-20 ([fthiery/aiotemescal#2](https://github.com/fthiery/aiotemescal/pull/2)),
+a second one with 0.5.2, without input changes, and a watch of the soundbar,
+posted on 2026-11-23 ([fthiery/aiotemescal#8](https://github.com/fthiery/aiotemescal/issues/8)),
 and weeks of use with his library [lg-bartalk](https://github.com/skynet01/lg-bartalk)
 ([home-assistant/core#189520](https://github.com/home-assistant/core/pull/189520)).
 It may or may not apply to other models.
@@ -28,42 +30,52 @@ It may or may not apply to other models.
   on with the TV.
 - Sound modes offered (`ai_eq_list`): 19, 0, 7, 26, 21, 6, 22, 14, 5, 15, 23,
   24 and 25. Mode 23 is presumably "Sound Share", as on the SP8YA; modes 24 to 26
-  have no name in aiotemescal yet.
+  have no name in aiotemescal yet:
+  - selecting 24 showed "AI Sound Pro" on the display, but the soundbar
+    reported mode 19 (AI Sound Pro) right after it, so it may have switched to
+    19 rather than shown a name for 24;
+  - selecting 25 or 26 left the input name on the display;
+  - 26 takes the place of 20 (Clear Voice) in the list of the SP8YA, so it may be
+    a variant of it. This is a guess.
 - The volume goes from 0 to 100 (`i_vol_max`), against 40 on the SP8YA.
 
 ## Power
 
 - It reports `b_powerstatus`, so `reports_power` is `True` and its power state
   can be followed.
+- **Every power change is sent by itself**, within a second: standby and on
+  with the remote, `set_power(False)` and `set_power(True)`, and standby when
+  the TV is turned off.
 - `set_power()` works both ways: `b_powerkey` false puts it in standby and true
-  turns it back on, and each change is reported right away.
-- During the guided report, the input was switched to HDMI, HDMI2, USB2 and
-  then Wi-Fi before the soundbar went to standby by itself, so the comparison
-  between on and standby mixes the input change with the power change: only
-  `b_powerstatus` and `s_audio_source` (`" PCM "` to `"NO SIGNAL"`) can be
-  attributed to standby. `b_connect` seems to follow the connection of the
-  current input rather than the power state (it was `true` on Wi-Fi), and is
-  not needed here since `b_powerstatus` is reported. A new run of the guided
-  report, without changing input, would confirm it.
+  turns it back on.
+- **Only `b_powerstatus` differs between on and standby.** Without input
+  changes, as in the second report, `i_curr_func`, `b_connect` and
+  `s_audio_source` stay the same. In the first report, `s_audio_source` went from
+  `" PCM "` to `"NO SIGNAL"` and `b_connect` changed because the input changed;
+  `b_connect` follows the connection of the current input (it is `true` on
+  Wi-Fi), not the power state.
 - It also pushes `DIAG_INFO` messages about the connection of its rear speakers
   and subwoofer (`b_rear_l_connected`, `b_rear_r_connected`,
   `b_woofer_connected`) while it turns on.
 
 ## Disconnections
 
-- **Asking for its state in standby does not wake it up**, as checked by the
-  guided report and over weeks of lg-bartalk asking for it about 5 s after
-  every shutdown.
+- **Asking for its state in standby does not wake it up**, after a standby
+  with the remote as after the usual one, even a few minutes later, as checked
+  by both guided reports and over weeks of lg-bartalk asking for it about 5 s
+  after every shutdown.
 - **A connection that never sent a request does not receive the power-on
   update.** aiotemescal asks for the whole state on every connection, so it is
   not affected.
 - **Silent sessions.** After being turned on or off by hand, it can stop
   sending updates without closing the TCP connection, while commands still
   work. aiotemescal checks a device that reported being on and stays silent
-  (README, "Silent devices"). This was not exercised by the report, which uses
-  a single connection without that check.
+  (README, "Silent devices"). Watched with aiotemescal 0.5.2 for more than 3
+  minutes while on, it answered that check every 30 s, in about 5 ms.
 - **Dead session after some manual shutdowns.** Not every time, the connection
   stops delivering updates after the device is turned off by hand, and the
   next power-on is never reported. The silent device check does not cover
   devices in standby. lg-bartalk reconnected about 5 s after each off report
-  and asked for the state once (README, Future work).
+  and asked for the state once (README, Future work). It did not happen during
+  the watch of 2026-11-23: after one manual off, about 2 minutes in standby and
+  on again, both changes were pushed on the same connection.
